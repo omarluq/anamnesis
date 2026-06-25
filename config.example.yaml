@@ -1,0 +1,7 @@
+app:
+  name: og-template
+  env: development
+
+logging:
+  level: info
+  format: pretty
