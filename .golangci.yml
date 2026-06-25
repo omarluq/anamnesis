@@ -57,6 +57,41 @@ linters:
     - varnamelen
     - forbidigo
     - cyclop
+    - asasalint
+    - bidichk
+    - canonicalheader
+    - containedctx
+    - contextcheck
+    - copyloopvar
+    - dogsled
+    - dupword
+    - durationcheck
+    - embeddedstructfieldcheck
+    - errchkjson
+    - fatcontext
+    - forcetypeassert
+    - funcorder
+    - godoclint
+    - inamedparam
+    - interfacebloat
+    - intrange
+    - loggercheck
+    - makezero
+    - modernize
+    - musttag
+    - nestif
+    - nilnesserr
+    - nlreturn
+    - nosprintfhostport
+    - perfsprint
+    - protogetter
+    - rowserrcheck
+    - sloglint
+    - sqlclosecheck
+    - testifylint
+    - usestdlibvars
+    - wsl_v5
+    - zerologlint
 
   exclusions:
     rules:
@@ -151,4 +186,4 @@ linters:
 
     exhaustruct:
       include:
-        - ^github\.com/omarluq/og-template/.*
+        - ^github\.com/omarluq/anamnesis/.*

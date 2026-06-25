@@ -2,7 +2,7 @@ version: '3'
 dotenv: ['.env']
 
 vars:
-  BINARY_NAME: og-template
+  BINARY_NAME: ana
   BUILD_DIR: ./bin
   COVERAGE_FILE: coverage.out
   MAIN_PACKAGE: ./cmd/{{.BINARY_NAME}}
@@ -42,9 +42,9 @@ tasks:
       BUILD_DATE:
         sh: date -u +"%Y-%m-%dT%H:%M:%SZ"
       LDFLAGS: >-
-        -X github.com/omarluq/og-template/internal/vinfo.Version={{.VERSION}}
-        -X github.com/omarluq/og-template/internal/vinfo.Commit={{.COMMIT}}
-        -X github.com/omarluq/og-template/internal/vinfo.BuildDate={{.BUILD_DATE}}
+        -X github.com/omarluq/anamnesis/internal/vinfo.Version={{.VERSION}}
+        -X github.com/omarluq/anamnesis/internal/vinfo.Commit={{.COMMIT}}
+        -X github.com/omarluq/anamnesis/internal/vinfo.BuildDate={{.BUILD_DATE}}
     cmds:
       - go build -ldflags "{{.LDFLAGS}}" -o {{.BUILD_DIR}}/{{.BINARY_NAME}} {{.MAIN_PACKAGE}}
 
@@ -104,12 +104,6 @@ tasks:
     cmds:
       - lefthook install
 
-  init:
-    desc: Initialize project (interactive rename + deps + hooks)
-    cmds:
-      - go run ./cmd/init
-      - task: deps
-      - task: hooks-install
 
   ci:
     desc: Run CI checks

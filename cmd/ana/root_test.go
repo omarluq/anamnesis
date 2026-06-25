@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	main "github.com/omarluq/og-template/cmd/og-template"
+	main "github.com/omarluq/anamnesis/cmd/ana"
 )
 
 func TestRootCmd_ShowsHelp(t *testing.T) {
@@ -19,5 +19,5 @@ func TestRootCmd_ShowsHelp(t *testing.T) {
 
 	err := cmd.Execute()
 	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "og-template")
+	assert.Contains(t, buf.String(), "ana")
 }

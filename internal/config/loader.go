@@ -14,7 +14,7 @@ func Load(path string) mo.Result[*Config] {
 	viperInstance := viper.New()
 	setDefaults(viperInstance)
 
-	viperInstance.SetEnvPrefix("OGTEMPLATE")
+	viperInstance.SetEnvPrefix("ANAMNESIS")
 	viperInstance.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	viperInstance.AutomaticEnv()
 
@@ -24,7 +24,7 @@ func Load(path string) mo.Result[*Config] {
 		viperInstance.SetConfigName("config")
 		viperInstance.SetConfigType("yaml")
 		viperInstance.AddConfigPath(".")
-		viperInstance.AddConfigPath("$HOME/.config/og-template")
+		viperInstance.AddConfigPath("$HOME/.config/ana")
 	}
 
 	if err := viperInstance.ReadInConfig(); err != nil {
@@ -47,7 +47,7 @@ func Load(path string) mo.Result[*Config] {
 }
 
 func setDefaults(viperInstance *viper.Viper) {
-	viperInstance.SetDefault("app.name", "og-template")
+	viperInstance.SetDefault("app.name", "ana")
 	viperInstance.SetDefault("app.env", "development")
 	viperInstance.SetDefault("logging.level", "info")
 	viperInstance.SetDefault("logging.format", "pretty")

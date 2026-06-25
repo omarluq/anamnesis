@@ -1,5 +1,5 @@
 app:
-  name: og-template
+  name: ana
   env: development
 
 logging:

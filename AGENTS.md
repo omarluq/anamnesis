@@ -1,4 +1,4 @@
-# og-template - AI Agent Instructions
+# ana - AI Agent Instructions
 
 ## Project Overview
 
@@ -31,7 +31,7 @@ mise exec -- task ci             # Full CI pipeline
 
 ### Project Structure
 ```
-cmd/og-template/          # CLI entrypoint (main.go, root.go, config.go, version.go)
+cmd/ana/          # CLI entrypoint (main.go, root.go, config.go, version.go)
 internal/
   config/         # Viper config loader (config.go, loader.go)
   di/             # samber/do DI container (container.go, register.go, config_service.go, logger_service.go)
@@ -78,7 +78,7 @@ cfg := do.MustInvoke[*ConfigService](injector)
 
 ## Code Style
 
-- Follow existing patterns in `internal/di/` and `cmd/og-template/`
+- Follow existing patterns in `internal/di/` and `cmd/ana/`
 - Use `oops.In("domain").Code("code").Wrapf(err, "msg")` for error wrapping
 - Use `lo.Map`, `lo.SliceToMap`, `lo.MaxBy` for collections
 - Use `mo.Option`, `mo.Result` for monadic error handling
@@ -88,9 +88,9 @@ cfg := do.MustInvoke[*ConfigService](injector)
 
 ## When Adding Commands
 
-1. Create new file in `cmd/og-template/yourcmd.go`
+1. Create new file in `cmd/ana/yourcmd.go`
 2. Export `newYourCmd()` function returning `*cobra.Command`
-3. Add to root command in `cmd/og-template/root.go`
+3. Add to root command in `cmd/ana/root.go`
 4. If config needed, use existing DI services or register new ones
 
 ## When Adding Services
@@ -102,15 +102,15 @@ cfg := do.MustInvoke[*ConfigService](injector)
 ## Renaming When Using Template
 
 Run `task init` for interactive rename, or manually:
-1. Replace `github.com/omarluq/og-template` with your module path
-2. Replace `og-template` binary name with your project name
-3. Update `OGTEMPLATE_` env prefix in `internal/config/loader.go`
-4. Rename `cmd/og-template/` to `cmd/yourproject/`
+1. Replace `github.com/omarluq/anamnesis` with your module path
+2. Replace `ana` binary name with your project name
+3. Update `ANAMNESIS_` env prefix in `internal/config/loader.go`
+4. Rename `cmd/ana/` to `cmd/yourproject/`
 
 ## Files to Edit When Starting a Project
 
 1. `go.mod` - update module name
-2. `cmd/og-template/main.go` - import path
+2. `cmd/ana/main.go` - import path
 3. `internal/vinfo/version.go` - import path in ldflags comment
 4. `Taskfile.yml` - binary name, MAIN_PACKAGE, ldflags paths
 5. `.golangci.yml` - exhaustruct include pattern

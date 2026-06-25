@@ -32,7 +32,6 @@ coverage.html
 Thumbs.db
 
 # AI tool configs
-.claude/
 .opencode/
 .adal/
 .augment/
