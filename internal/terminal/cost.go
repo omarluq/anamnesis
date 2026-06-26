@@ -3,6 +3,8 @@ package terminal
 import (
 	"fmt"
 
+	"github.com/dustin/go-humanize"
+
 	"github.com/omarluq/anamnesis/internal/tui"
 )
 
@@ -51,9 +53,9 @@ func (pane *costPane) rows() [][]tui.TableCell {
 	style := pane.theme.fg(pane.theme.Text)
 
 	return [][]tui.TableCell{
-		{{Style: style, Text: "Tokens In"}, {Style: style, Text: tui.Int(pane.tokensIn)}},
-		{{Style: style, Text: "Tokens Out"}, {Style: style, Text: tui.Int(pane.tokensOut)}},
-		{{Style: style, Text: "Total"}, {Style: style, Text: tui.Int(pane.tokensIn + pane.tokensOut)}},
+		{{Style: style, Text: "Tokens In"}, {Style: style, Text: tokens(pane.tokensIn)}},
+		{{Style: style, Text: "Tokens Out"}, {Style: style, Text: tokens(pane.tokensOut)}},
+		{{Style: style, Text: "Total"}, {Style: style, Text: tokens(pane.tokensIn + pane.tokensOut)}},
 		{{Style: style, Text: "Cost"}, {Style: style, Text: pane.dollars()}},
 	}
 }
@@ -61,4 +63,9 @@ func (pane *costPane) rows() [][]tui.TableCell {
 // dollars formats the accumulated micro-dollar cost as a dollar amount.
 func (pane *costPane) dollars() string {
 	return fmt.Sprintf("$%.4f", float64(pane.costMicros)/costMicrosPerDollar)
+}
+
+// tokens renders a token count with thousands separators (e.g. "12,345").
+func tokens(count int) string {
+	return humanize.Comma(int64(count))
 }
