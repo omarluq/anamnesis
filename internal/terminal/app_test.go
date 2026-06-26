@@ -34,10 +34,16 @@ func TestHeaderTitleAppendsSpinnerOnlyWhileWorking(t *testing.T) {
 	assert.Equal(t, terminal.DefaultTitle, app.HeaderTitle())
 	assert.Empty(t, app.SpinnerGlyph())
 
-	app.SetWorking(true)
+	// A turn event marks the loop working, so the header gains the spinner glyph.
+	app.ApplyTrace(traceEvent(terminal.TraceKindTurn, "thinking", 0, 0, 0, 0))
 	app.SetSpinnerFrame(0)
 	assert.Equal(t, terminal.DefaultTitle+" "+string(terminal.SpinnerFrames[0]), app.HeaderTitle())
 	assert.NotEmpty(t, app.SpinnerGlyph())
+
+	// A final event clears the working state and retires the spinner.
+	app.ApplyTrace(traceEvent(terminal.TraceKindFinal, "done", 0, 0, 0, 0))
+	assert.Equal(t, terminal.DefaultTitle, app.HeaderTitle())
+	assert.Empty(t, app.SpinnerGlyph())
 }
 
 func TestLoopQuitsOnCtrlC(t *testing.T) {
@@ -162,12 +168,12 @@ func TestLoopAppliesMatchingTraceAndIgnoresStaleRunID(t *testing.T) {
 
 	// Matching RunID (0): a final event lands in the trace pane and a usage event
 	// tallies into the cost pane.
-	sendTrace(t, traceCh, traceEvent(terminal.TraceKindFinal, "answer", 0, 0, 0))
-	sendTrace(t, traceCh, traceEvent(terminal.TraceKindUsage, "tally", 10, 1_500_000, 0))
+	sendTrace(t, traceCh, traceEvent(terminal.TraceKindFinal, "answer", 0, 0, 0, 0))
+	sendTrace(t, traceCh, traceEvent(terminal.TraceKindUsage, "tally", 4, 10, 1_500_000, 0))
 
 	// Stale RunID: both events must be dropped by the loop's run gating.
-	sendTrace(t, traceCh, traceEvent(terminal.TraceKindFinal, "stale", 0, 0, 99))
-	sendTrace(t, traceCh, traceEvent(terminal.TraceKindUsage, "stale", 7, 9_000_000, 99))
+	sendTrace(t, traceCh, traceEvent(terminal.TraceKindFinal, "stale", 0, 0, 0, 99))
+	sendTrace(t, traceCh, traceEvent(terminal.TraceKindUsage, "stale", 7, 8, 9_000_000, 99))
 
 	screen.inject(tcell.NewEventKey(tcell.KeyCtrlC, "", tcell.ModNone))
 	require.NoError(t, awaitLoop(t, done))
@@ -176,9 +182,9 @@ func TestLoopAppliesMatchingTraceAndIgnoresStaleRunID(t *testing.T) {
 	require.Len(t, app.TraceLines(), 1)
 	assert.Equal(t, "[final] answer", app.TraceLines()[0])
 
-	// Cost pane reflects only the matching usage event (usage routes tokens to the
-	// "out" column).
-	assert.Equal(t, 0, app.CostTokensIn())
+	// Cost pane reflects only the matching usage event; its input and output token
+	// counts route to their own columns.
+	assert.Equal(t, 4, app.CostTokensIn())
 	assert.Equal(t, 10, app.CostTokensOut())
 	assert.Equal(t, int64(1_500_000), app.CostMicros())
 	assert.Equal(t, "$1.5000", app.CostDollarText())
@@ -214,13 +220,14 @@ func TestApplyTraceRoutesUsageToCostAndRestToTrace(t *testing.T) {
 
 	app := terminal.NewApp(newFakeScreen(80, 24), terminal.RunOptions{Trace: nil, Title: terminal.DefaultTitle})
 
-	app.ApplyTrace(traceEvent(terminal.TraceKindTurn, "thinking", 0, 0, 0))
-	app.ApplyTrace(traceEvent(terminal.TraceKindUsage, "meter", 5, 250_000, 0))
+	app.ApplyTrace(traceEvent(terminal.TraceKindTurn, "thinking", 0, 0, 0, 0))
+	app.ApplyTrace(traceEvent(terminal.TraceKindUsage, "meter", 2, 5, 250_000, 0))
 
 	require.Len(t, app.TraceLines(), 1, "non-usage events append to the trace pane")
 	assert.Equal(t, "[turn] thinking", app.TraceLines()[0])
 
-	assert.Equal(t, 5, app.CostTokensOut(), "usage events tally into the cost pane only")
+	assert.Equal(t, 2, app.CostTokensIn(), "usage events tally input tokens into the cost pane")
+	assert.Equal(t, 5, app.CostTokensOut(), "usage events tally output tokens into the cost pane")
 	assert.Equal(t, int64(250_000), app.CostMicros())
 }
 
@@ -241,7 +248,7 @@ func TestAppRendersThreePanesAndQuits(t *testing.T) {
 	go func() { done <- app.Loop(context.Background()) }()
 
 	// One live event flows through the channel into the trace pane.
-	sendTrace(t, traceCh, traceEvent(terminal.TraceKindFinal, "final answer", 12, 2_000_000, 0))
+	sendTrace(t, traceCh, traceEvent(terminal.TraceKindFinal, "final answer", 5, 7, 2_000_000, 0))
 
 	// A quit key must terminate the loop with no error and no panic.
 	screen.inject(tcell.NewEventKey(tcell.KeyCtrlC, "", tcell.ModNone))

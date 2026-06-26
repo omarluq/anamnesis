@@ -23,17 +23,17 @@ func TestTraceTextFormatsEvents(t *testing.T) {
 		{
 			name:  "turn without tokens",
 			want:  "[turn] thinking",
-			event: traceEvent(terminal.TraceKindTurn, "thinking", 0, 0, 0),
+			event: traceEvent(terminal.TraceKindTurn, "thinking", 0, 0, 0, 0),
 		},
 		{
 			name:  "sub-call without tokens",
 			want:  "[sub-call] tool",
-			event: traceEvent(terminal.TraceKindSubCall, "tool", 0, 0, 0),
+			event: traceEvent(terminal.TraceKindSubCall, "tool", 0, 0, 0, 0),
 		},
 		{
-			name:  "final with tokens",
+			name:  "final sums input and output tokens",
 			want:  "[final] answer (42 tok)",
-			event: traceEvent(terminal.TraceKindFinal, "answer", 42, 0, 0),
+			event: traceEvent(terminal.TraceKindFinal, "answer", 30, 12, 0, 0),
 		},
 	}
 
@@ -92,8 +92,8 @@ func TestTracePaneAppendEventAppendsStyledLine(t *testing.T) {
 	theme := terminal.DefaultTheme()
 	app := terminal.NewApp(newFakeScreen(80, 24), terminal.RunOptions{Trace: nil, Title: terminal.DefaultTitle})
 
-	app.ApplyTrace(traceEvent(terminal.TraceKindTurn, "first", 0, 0, 0))
-	app.ApplyTrace(traceEvent(terminal.TraceKindFinal, "done", 7, 0, 0))
+	app.ApplyTrace(traceEvent(terminal.TraceKindTurn, "first", 0, 0, 0, 0))
+	app.ApplyTrace(traceEvent(terminal.TraceKindFinal, "done", 3, 4, 0, 0))
 
 	lines := app.TraceLines()
 	require.Len(t, lines, 2)
@@ -116,7 +116,10 @@ func TestTracePaneDrawShowsAppendedEventText(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- app.Loop(context.Background()) }()
 
-	sendTrace(t, traceCh, traceEvent(terminal.TraceKindSubCall, "embedding", 0, 0, 0))
+	sendTrace(t, traceCh, traceEvent(terminal.TraceKindSubCall, "embedding", 0, 0, 0, 0))
+	// A sub-call marks the loop working, so its draw is throttled to the frame
+	// ticker; wait for that frame before quitting so the assertion is not racy.
+	awaitRender(t, screen, 2)
 	screen.inject(tcell.NewEventKey(tcell.KeyCtrlC, "", tcell.ModNone))
 	require.NoError(t, awaitLoop(t, done))
 
