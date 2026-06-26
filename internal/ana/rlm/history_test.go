@@ -31,13 +31,13 @@ func TestRender(t *testing.T) {
 			},
 		}
 
-		want := `ASSISTANT (turn 0): boots := journal.Boots()
+		want := `ASSISTANT (turn 0): "boots := journal.Boots()"
 TOOL OUTPUT (turn 0):
   stdout: ""
   retval: nil
   error:  nil
 
-ASSISTANT (turn 1): fmt.Println(len(boots))
+ASSISTANT (turn 1): "fmt.Println(len(boots))"
 TOOL OUTPUT (turn 1):
   stdout: "3\n"
   retval: nil
@@ -60,7 +60,7 @@ TOOL OUTPUT (turn 1):
 			},
 		}
 
-		want := `ASSISTANT (turn 2): agent.FINAL(answer)
+		want := `ASSISTANT (turn 2): "agent.FINAL(answer)"
 TOOL OUTPUT (turn 2):
   stdout: "done\n"
   retval: 42
@@ -79,4 +79,31 @@ TOOL OUTPUT (turn 2):
 
 		assert.Empty(t, rlm.Render(nil))
 	})
+}
+
+func TestRenderMultilineCode(t *testing.T) {
+	t.Parallel()
+
+	history := []rlm.ControllerTurn{
+		{
+			Index:  3,
+			Code:   "x := journal.Boots()\nfmt.Println(len(x))",
+			Stdout: "",
+			Retval: "",
+			Err:    "",
+		},
+	}
+
+	want := `ASSISTANT (turn 3): "x := journal.Boots()\nfmt.Println(len(x))"
+TOOL OUTPUT (turn 3):
+  stdout: ""
+  retval: nil
+  error:  nil
+`
+
+	got := rlm.Render(history)
+	assert.Equal(t, want, got)
+	// The embedded newline must be escaped, not emitted as a raw break that
+	// would spill the controller code across multiple transcript lines.
+	assert.NotContains(t, got, "ASSISTANT (turn 3): x := journal.Boots()\n")
 }
