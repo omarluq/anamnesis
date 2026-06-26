@@ -9,8 +9,7 @@ import (
 const (
 	composerHeight    = 3
 	composerBorders   = 2
-	welcomeText       = "# anamnesis\n\nType a message and press Enter to begin.\n"
-	composerLabel     = "Message"
+	welcomeText       = "Type a message and press Enter to begin.\n"
 	submittedQuestion = "\n\n**you:** "
 )
 
@@ -25,7 +24,6 @@ type chatPane struct {
 // newChatPane returns a chat pane seeded with a welcome message.
 func newChatPane(theme Theme, title string) *chatPane {
 	composer := tui.NewTextArea()
-	composer.Label = composerLabel
 
 	return &chatPane{
 		view: &tui.MarkdownView{

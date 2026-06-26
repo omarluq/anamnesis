@@ -23,6 +23,7 @@ func TestTableRenderAlignmentClippingAndDraw(t *testing.T) {
 			{testTableCell("語"), testTableCell("200")},
 		},
 		Alignments: []tui.Alignment{tui.AlignLeft, tui.AlignRight},
+		Stretch:    false,
 	}
 
 	lines := table.Render(24, 10)
@@ -43,6 +44,7 @@ func TestTableRenderAlignmentClippingAndDraw(t *testing.T) {
 		Headers:     nil,
 		Rows:        [][]tui.TableCell{{testTableCell("x")}},
 		Alignments:  []tui.Alignment{tui.AlignCenter},
+		Stretch:      false,
 	}
 	centered := centeredTable.Render(7, 10)
 	require.Contains(t, strings.Join(lineTexts(centered), "\n"), " x ")
@@ -66,6 +68,7 @@ func TestTableRenderShortHeightKeepsHeaderAndBorders(t *testing.T) {
 			{testTableCell("c"), testTableCell("3")},
 		},
 		Alignments: nil,
+		Stretch:    false,
 	}
 
 	// Height 5 fits top border + header + separator + one data row + bottom border.
@@ -86,4 +89,27 @@ func TestTableRenderShortHeightKeepsHeaderAndBorders(t *testing.T) {
 	tiny := table.Render(24, 1)
 	require.Len(t, tiny, 1)
 	require.True(t, strings.HasPrefix(lineTexts(tiny)[0], "╭"), "single visible row must be the top border")
+}
+
+func TestTableStretchFillsWidth(t *testing.T) {
+	t.Parallel()
+
+	table := &tui.Table{
+		Style:       tcell.StyleDefault,
+		HeaderStyle: tcell.StyleDefault,
+		BorderStyle: tcell.StyleDefault,
+		Headers:     []tui.TableCell{testTableCell("A"), testTableCell("B")},
+		Rows:        [][]tui.TableCell{{testTableCell("x"), testTableCell("1")}},
+		Alignments:  []tui.Alignment{tui.AlignLeft, tui.AlignRight},
+		Stretch:     true,
+	}
+
+	const stretchWidth = 40
+
+	lines := table.Render(stretchWidth, 10)
+	require.NotEmpty(t, lines)
+
+	for _, line := range lines {
+		require.Equalf(t, stretchWidth, line.Width(), "a stretched table line must fill the full width")
+	}
 }

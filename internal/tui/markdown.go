@@ -340,6 +340,7 @@ func (renderer *markdownRenderer) renderTable(node *extast.Table, indent string)
 		Style:       renderer.styles.Text,
 		HeaderStyle: renderer.styles.Accent.Bold(true),
 		BorderStyle: renderer.styles.Muted,
+		Stretch:     false,
 	}
 
 	for _, line := range table.Render(max(1, renderer.width-Width(indent)), markdownTableMaxHeight) {

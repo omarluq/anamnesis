@@ -38,6 +38,9 @@ type Table struct {
 	Headers     []TableCell
 	Rows        [][]TableCell
 	Alignments  []Alignment
+	// Stretch widens the last column so the table fills the available width;
+	// when false the table renders at its content width.
+	Stretch bool
 }
 
 // Render returns table lines clipped to width and height. The top border and
@@ -144,6 +147,12 @@ func (table *Table) columnWidths(rows [][]TableCell, colCount, maxWidth int) []i
 		}
 
 		widths[largest]--
+	}
+
+	if table.Stretch {
+		if slack := available - sumInts(widths); slack > 0 {
+			widths[colCount-1] += slack
+		}
 	}
 
 	return widths
