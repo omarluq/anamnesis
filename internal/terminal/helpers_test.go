@@ -134,8 +134,55 @@ func runeKey(text string) *tcell.EventKey {
 }
 
 // traceEvent builds a fully-populated TraceEvent, keeping table rows readable.
-func traceEvent(kind terminal.TraceKind, text string, tokens int, micros int64, runID uint64) terminal.TraceEvent {
-	return terminal.TraceEvent{Kind: kind, Text: text, Tokens: tokens, CostMicros: micros, RunID: runID}
+func traceEvent(
+	kind terminal.TraceKind,
+	text string,
+	tokensIn, tokensOut int,
+	micros int64,
+	runID uint64,
+) terminal.TraceEvent {
+	return terminal.TraceEvent{
+		Kind:       kind,
+		Text:       text,
+		TokensIn:   tokensIn,
+		TokensOut:  tokensOut,
+		CostMicros: micros,
+		RunID:      runID,
+	}
+}
+
+// screenRow returns the single rendered row of text that contains label,
+// failing the test when no row carries it. It binds a metric to the value on
+// its own line so assertions guard token routing instead of bare substrings.
+func screenRow(t *testing.T, text, label string) string {
+	t.Helper()
+
+	for row := range strings.SplitSeq(text, "\n") {
+		if strings.Contains(row, label) {
+			return row
+		}
+	}
+
+	t.Fatalf("no rendered row contains %q", label)
+
+	return ""
+}
+
+// awaitRender waits until the screen has flushed at least want frames so a
+// throttled draw (one issued while the loop is working) completes before the
+// test inspects the rendered cells.
+func awaitRender(t *testing.T, screen *fakeScreen, want int) {
+	t.Helper()
+
+	deadline := time.After(loopTimeout)
+
+	for screen.showCount() < want {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for screen render")
+		case <-time.After(time.Millisecond):
+		}
+	}
 }
 
 // sendTrace posts a trace event with a bounded wait so a wedged loop fails the

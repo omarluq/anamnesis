@@ -48,8 +48,9 @@ func (pane *tracePane) appendEvent(event TraceEvent) {
 
 // traceText formats an event into a single display string.
 func traceText(event TraceEvent) string {
-	if event.Tokens > 0 {
-		return fmt.Sprintf("[%s] %s (%d tok)", event.Kind, event.Text, event.Tokens)
+	tokens := event.TokensIn + event.TokensOut
+	if tokens > 0 {
+		return fmt.Sprintf("[%s] %s (%d tok)", event.Kind, event.Text, tokens)
 	}
 
 	return fmt.Sprintf("[%s] %s", event.Kind, event.Text)

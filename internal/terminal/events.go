@@ -23,8 +23,10 @@ type TraceEvent struct {
 	Kind TraceKind
 	// Text is the human-readable line shown in the trace pane.
 	Text string
-	// Tokens is the token count associated with this step, when known.
-	Tokens int
+	// TokensIn is the input (prompt) token count for this step, when known.
+	TokensIn int
+	// TokensOut is the output (completion) token count for this step, when known.
+	TokensOut int
 	// CostMicros is the cost of this step in millionths of a US dollar.
 	CostMicros int64
 	// RunID identifies the run that produced the event for stale-event gating.

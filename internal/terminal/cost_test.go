@@ -71,7 +71,9 @@ func TestCostPaneDrawRendersMetricTable(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- app.Loop(context.Background()) }()
 
-	sendTrace(t, traceCh, traceEvent(terminal.TraceKindUsage, "spend", 100, 1_500_000, 0))
+	// Distinct in/out counts so each value anchors to its own row: a routing
+	// regression that swapped the columns would move "40" and "60" and fail.
+	sendTrace(t, traceCh, traceEvent(terminal.TraceKindUsage, "spend", 40, 60, 1_500_000, 0))
 	screen.inject(tcell.NewEventKey(tcell.KeyCtrlC, "", tcell.ModNone))
 	require.NoError(t, awaitLoop(t, done))
 
@@ -79,6 +81,8 @@ func TestCostPaneDrawRendersMetricTable(t *testing.T) {
 	assert.Contains(t, text, "Metric")
 	assert.Contains(t, text, "Value")
 	assert.Contains(t, text, "Tokens In")
-	assert.Contains(t, text, "100")
-	assert.Contains(t, text, "$1.5000")
+	assert.Contains(t, screenRow(t, text, "Tokens In"), "40")
+	assert.Contains(t, screenRow(t, text, "Tokens Out"), "60")
+	assert.Contains(t, screenRow(t, text, "Total"), "100")
+	assert.Contains(t, screenRow(t, text, "Cost"), "$1.5000")
 }

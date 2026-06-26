@@ -84,9 +84,6 @@ func (app *App) HeaderTitle() string { return app.headerTitle() }
 // SpinnerGlyph returns the active spinner frame, empty when idle.
 func (app *App) SpinnerGlyph() string { return app.spinnerGlyph() }
 
-// SetWorking toggles the working flag that drives the spinner.
-func (app *App) SetWorking(working bool) { app.working = working }
-
 // SetSpinnerFrame fixes the spinner frame index.
 func (app *App) SetSpinnerFrame(frame int) { app.spinnerFrame = frame }
 

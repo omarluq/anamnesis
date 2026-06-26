@@ -139,11 +139,13 @@ func (app *App) drawIfDirty() {
 	}
 }
 
-// handleTrace applies a trace event, detaching the channel once it closes and
-// dropping events whose RunID does not match the active run.
+// handleTrace applies a trace event, detaching the channel and clearing the
+// working state once it closes, and dropping events whose RunID does not match
+// the active run.
 func (app *App) handleTrace(event TraceEvent, ok bool) {
 	if !ok {
 		app.traceCh = nil
+		app.working = false
 
 		return
 	}
@@ -221,12 +223,19 @@ func (app *App) isQuitKey(keyEvent tui.KeyEvent) bool {
 	}
 }
 
-// applyTrace routes a trace event to the pane that owns its kind.
+// applyTrace routes a trace event to the pane that owns its kind and tracks the
+// working state that drives the header spinner: turns and sub-calls mark the
+// loop busy, a final answer clears it, and usage events leave it unchanged.
 func (app *App) applyTrace(event TraceEvent) {
-	if event.Kind == TraceKindUsage {
-		app.cost.applyUsage(0, event.Tokens, event.CostMicros)
+	switch event.Kind {
+	case TraceKindUsage:
+		app.cost.applyUsage(event.TokensIn, event.TokensOut, event.CostMicros)
 
 		return
+	case TraceKindTurn, TraceKindSubCall:
+		app.working = true
+	case TraceKindFinal:
+		app.working = false
 	}
 
 	app.trace.appendEvent(event)
