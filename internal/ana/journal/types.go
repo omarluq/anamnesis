@@ -71,14 +71,16 @@ type QueryFilter struct {
 	Since time.Time
 	// Until is the inclusive realtime upper bound for matched entries.
 	Until time.Time
+	// MaxPriority keeps only entries with PRIORITY <= this value (0..7).
+	// A nil pointer means no priority constraint, which keeps 0 (emerg)
+	// distinct from "unspecified" and preserves the zero-value contract.
+	MaxPriority *int
 	// Unit restricts matches to a single _SYSTEMD_UNIT.
 	Unit string
 	// BootID restricts matches to a single _BOOT_ID.
 	BootID string
 	// Grep keeps only entries whose MESSAGE contains this substring.
 	Grep string
-	// MaxPriority keeps only entries with PRIORITY <= this value (0..7).
-	MaxPriority int
 	// Limit is the hard cap on returned entries (default 1000, max 10000).
 	Limit int
 }
