@@ -6,6 +6,7 @@ require (
 	charm.land/fang/v2 v2.0.1
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/clipperhouse/displaywidth v0.11.0
+	github.com/dustin/go-humanize v1.0.1
 	github.com/gdamore/tcell/v3 v3.4.0
 	github.com/rs/zerolog v1.35.1
 	github.com/sahilm/fuzzy v0.1.3

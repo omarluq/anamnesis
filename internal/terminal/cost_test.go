@@ -60,6 +60,17 @@ func TestCostRowsReflectTotals(t *testing.T) {
 	assert.Equal(t, []string{"Cost", "$1.5000"}, rows[3])
 }
 
+func TestCostRowsFormatLargeTokenCountsWithSeparators(t *testing.T) {
+	t.Parallel()
+
+	rows := terminal.CostProbe([3]int64{1_234_000, 567, 0}).Rows
+	require.Len(t, rows, 4)
+
+	assert.Equal(t, []string{"Tokens In", "1,234,000"}, rows[0])
+	assert.Equal(t, []string{"Tokens Out", "567"}, rows[1])
+	assert.Equal(t, []string{"Total", "1,234,567"}, rows[2])
+}
+
 func TestCostPaneDrawRendersMetricTable(t *testing.T) {
 	t.Parallel()
 

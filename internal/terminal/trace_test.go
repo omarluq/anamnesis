@@ -35,6 +35,11 @@ func TestTraceTextFormatsEvents(t *testing.T) {
 			want:  "[final] answer (42 tok)",
 			event: traceEvent(terminal.TraceKindFinal, "answer", 30, 12, 0, 0),
 		},
+		{
+			name:  "large token counts use thousands separators",
+			want:  "[final] answer (1,234 tok)",
+			event: traceEvent(terminal.TraceKindFinal, "answer", 1200, 34, 0, 0),
+		},
 	}
 
 	for _, testCase := range cases {
