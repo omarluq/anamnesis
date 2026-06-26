@@ -53,6 +53,14 @@ func TestCloneOrNil(t *testing.T) {
 func TestIntMapToAnyMap(t *testing.T) {
 	t.Parallel()
 
+	nilResult := mapsutil.IntMapToAnyMap(map[string]int(nil))
+	assert.NotNil(t, nilResult)
+	assert.Empty(t, nilResult)
+
+	emptyResult := mapsutil.IntMapToAnyMap(map[string]int{})
+	assert.NotNil(t, emptyResult)
+	assert.Empty(t, emptyResult)
+
 	original := map[string]int{"a": 1}
 	cloned := mapsutil.IntMapToAnyMap(original)
 	cloned["a"] = 2
