@@ -15,7 +15,7 @@ func TestDefaultThemeColorsAreNonZero(t *testing.T) {
 	theme := terminal.DefaultTheme()
 	colors := []tcell.Color{
 		theme.Text, theme.Accent, theme.Success, theme.Warning, theme.Dim,
-		theme.Muted, theme.Border, theme.DiffAdd, theme.DiffDel, theme.Background,
+		theme.Muted, theme.Border, theme.DiffAdd, theme.DiffDel,
 	}
 
 	for index, color := range colors {

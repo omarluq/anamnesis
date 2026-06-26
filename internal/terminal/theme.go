@@ -19,7 +19,6 @@ const (
 	hexBorder     = 0x3b4261
 	hexDiffAdd    = 0x9ece6a
 	hexDiffDel    = 0xf7768e
-	hexBackground = 0x1a1b26
 )
 
 // Theme is the resolved color palette used to build every tui style set.
@@ -33,7 +32,6 @@ type Theme struct {
 	Border     tcell.Color
 	DiffAdd    tcell.Color
 	DiffDel    tcell.Color
-	Background tcell.Color
 }
 
 // DefaultTheme returns the built-in dark palette.
@@ -48,7 +46,6 @@ func DefaultTheme() Theme {
 		Border:     tcell.NewHexColor(hexBorder),
 		DiffAdd:    tcell.NewHexColor(hexDiffAdd),
 		DiffDel:    tcell.NewHexColor(hexDiffDel),
-		Background: tcell.NewHexColor(hexBackground),
 	}
 }
 
@@ -97,9 +94,9 @@ func (theme Theme) ListStyles() tui.ListStyles {
 	}
 }
 
-// fg returns a foreground style painting color over the theme background.
+// fg returns a transparent-background style painting color as the foreground.
 func (theme Theme) fg(color tcell.Color) tcell.Style {
-	return tcell.StyleDefault.Background(theme.Background).Foreground(color)
+	return tcell.StyleDefault.Foreground(color)
 }
 
 // bg returns a style painting color as the cell background over the theme text.

@@ -34,6 +34,7 @@ func (pane *costPane) Draw(screen tui.ContentSetter, rect tui.Rect) {
 		},
 		Rows:       pane.rows(),
 		Alignments: []tui.Alignment{tui.AlignLeft, tui.AlignRight},
+		Stretch:    true,
 	}
 	table.Draw(screen, rect)
 }

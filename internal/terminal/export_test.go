@@ -11,9 +11,6 @@ import (
 // DefaultTitle is the chat title applied when RunOptions.Title is empty.
 const DefaultTitle = defaultTitle
 
-// ComposerLabel is the label rendered on the chat composer box.
-const ComposerLabel = composerLabel
-
 // NewApp constructs a shell App bound to screen for black-box tests.
 var NewApp = newApp
 

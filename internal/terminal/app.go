@@ -38,9 +38,9 @@ type App struct {
 	cost         *costPane
 	traceCh      <-chan TraceEvent
 	title        string
-	theme        Theme
 	runID        uint64
 	spinnerFrame int
+	theme        Theme
 	dirty        bool
 	working      bool
 }

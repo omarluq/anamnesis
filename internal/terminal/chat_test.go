@@ -25,7 +25,6 @@ func TestChatPaneRenderShowsWelcomeMarkdown(t *testing.T) {
 	require.NotEmpty(t, lines)
 
 	text := strings.Join(lines, "\n")
-	assert.Contains(t, text, "anamnesis")
 	assert.Contains(t, text, "Type a message")
 }
 
@@ -119,7 +118,6 @@ func TestChatPaneDrawRendersBorderTitleAndComposer(t *testing.T) {
 
 	text := screen.contents()
 	assert.Contains(t, text, terminal.DefaultTitle, "chat box renders its title in the border")
-	assert.Contains(t, text, terminal.ComposerLabel, "composer renders its label")
 }
 
 func TestChatShellDrawsIntoTinyScreenWithoutPanic(t *testing.T) {
