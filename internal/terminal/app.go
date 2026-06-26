@@ -164,7 +164,21 @@ func (app *App) draw() {
 	frame := tui.NewCellBuffer(width, height, app.theme.fg(app.theme.Text))
 	app.layout().Draw(frame, tui.Rect{X: 0, Y: 0, Width: width, Height: height})
 	app.renderer.Flush(frame)
+	app.placeCursor()
 	app.screen.Show()
+}
+
+// placeCursor moves the native terminal cursor to the composer caret, hiding it
+// when the composer was not drawn this frame.
+func (app *App) placeCursor() {
+	column, row, visible := app.chat.cursorPosition()
+	if !visible {
+		app.screen.HideCursor()
+
+		return
+	}
+
+	app.screen.ShowCursor(column, row)
 }
 
 // layout composes the chat | [trace / cost] flex tree.

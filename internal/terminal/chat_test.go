@@ -120,6 +120,46 @@ func TestChatPaneDrawRendersBorderTitleAndComposer(t *testing.T) {
 	assert.Contains(t, text, terminal.DefaultTitle, "chat box renders its title in the border")
 }
 
+func TestChatComposerCursorTracksCaret(t *testing.T) {
+	t.Parallel()
+
+	screen := newFakeScreen(80, 24)
+	app := terminal.NewApp(screen, terminal.RunOptions{Trace: nil, Title: terminal.DefaultTitle})
+
+	app.Draw()
+
+	startColumn, startRow, startShown := screen.cursor()
+	require.True(t, startShown, "composer caret is shown when the composer is drawn")
+
+	wantColumn, wantRow, wantVisible := app.CursorPosition()
+	require.True(t, wantVisible)
+	assert.Equal(t, wantColumn, startColumn, "native cursor matches the pane's caret column")
+	assert.Equal(t, wantRow, startRow, "native cursor matches the pane's caret row")
+
+	for _, char := range "hi" {
+		app.ComposerInput(string(char), string(char))
+	}
+
+	app.Draw()
+
+	nextColumn, nextRow, nextShown := screen.cursor()
+	assert.True(t, nextShown)
+	assert.Equal(t, startRow, nextRow, "caret stays on the composer row while typing")
+	assert.Equal(t, startColumn+2, nextColumn, "caret advances one column per typed rune")
+}
+
+func TestChatComposerCursorHiddenWhenComposerNotDrawn(t *testing.T) {
+	t.Parallel()
+
+	screen := newFakeScreen(1, 1)
+	app := terminal.NewApp(screen, terminal.RunOptions{Trace: nil, Title: terminal.DefaultTitle})
+
+	app.Draw()
+
+	_, _, shown := screen.cursor()
+	assert.False(t, shown, "native cursor is hidden when the composer has no drawable area")
+}
+
 func TestChatShellDrawsIntoTinyScreenWithoutPanic(t *testing.T) {
 	t.Parallel()
 
