@@ -25,10 +25,18 @@ func NewLexerEngine() LexerEngine {
 }
 
 // IteratorFor returns a token iterator for untagged code by looking up the
-// cached lexer, or running full analysis on the first encounter.
+// cached lexer, or running full analysis on the first encounter. Both outcomes
+// are cached: a successful match stores the detected lexer, while a no-match
+// stores a nil sentinel so that plain or untagged snippets short-circuit the
+// O(N) registry scan on every subsequent render instead of re-running it.
 func (engine *LexerEngine) IteratorFor(text string) (chroma.Iterator, bool) {
 	cached, found := engine.cache.MustGet(text)
 	if found {
+		// A nil sentinel marks a previously analyzed no-match.
+		if cached == nil {
+			return nil, false
+		}
+
 		return tokenizeCode(cached, text)
 	}
 
@@ -44,11 +52,13 @@ func (engine *LexerEngine) IteratorFor(text string) (chroma.Iterator, bool) {
 		}
 	}
 
+	// Cache the outcome unconditionally — when no lexer matches, bestLexer is
+	// nil, recording the no-match so future lookups of this key short-circuit.
+	engine.cache.Set(text, bestLexer)
+
 	if highest == 0 {
 		return nil, false
 	}
-
-	engine.cache.Set(text, bestLexer)
 
 	return tokenizeCode(bestLexer, text)
 }

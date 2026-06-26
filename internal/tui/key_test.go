@@ -63,6 +63,13 @@ func TestNewKeyEvent(t *testing.T) {
 			text:  "",
 			ctrl:  false,
 		},
+		{
+			name:  "ctrl special key",
+			event: tcell.NewEventKey(tcell.KeyLeft, "", tcell.ModCtrl),
+			want:  "left",
+			text:  "",
+			ctrl:  true,
+		},
 	}
 
 	for _, test := range tests {

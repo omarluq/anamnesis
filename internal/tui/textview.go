@@ -43,7 +43,7 @@ func (view *TextView) Render(width, height int) []Line {
 		return []Line{}
 	}
 
-	start := min(max(0, view.Scroll), max(0, len(lines)-1))
+	start := min(max(0, view.Scroll), max(0, len(lines)-height))
 	end := min(start+height, len(lines))
 
 	return lines[start:end]
@@ -64,7 +64,12 @@ func (view *TextView) renderAll(width int) []Line {
 
 func (view *TextView) renderRichLines(width int) []Line {
 	if !view.Wrap {
-		return append([]Line{}, view.Lines...)
+		lines := make([]Line, 0, len(view.Lines))
+		for _, line := range view.Lines {
+			lines = append(lines, fitLine(line, width))
+		}
+
+		return lines
 	}
 
 	lines := make([]Line, 0, len(view.Lines))
@@ -73,6 +78,22 @@ func (view *TextView) renderRichLines(width int) []Line {
 	}
 
 	return lines
+}
+
+// fitLine clips line to the longest prefix that fits into width cells while
+// preserving span styles, matching the plain-text Fit behavior.
+func fitLine(line Line, width int) Line {
+	if width <= 0 {
+		return NewLine(line.Style, "")
+	}
+
+	if line.Width() <= width {
+		return line.Clone()
+	}
+
+	prefix := styledPrefix(line.styledSegments(), width)
+
+	return lineFromStyledSegments(prefix, line.Style)
 }
 
 // PlainTextLines renders plain text as styled lines.

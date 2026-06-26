@@ -32,9 +32,9 @@ func TestTreeRenderAndMarkers(t *testing.T) {
 	require.Equal(t, tcell.StyleDefault.Reverse(true), flattened[2].Style)
 
 	rendered := view.Render(8, 3)
-	require.Equal(t, []string{"  ▾ open", "      l…", "    pla…"}, lineTexts(rendered))
+	require.Equal(t, []string{"root", "  ▸ clo…", "  ▾ open"}, lineTexts(rendered))
 
 	buffer := tui.NewCellBuffer(8, 3, tcell.StyleDefault)
 	view.Draw(buffer, testRect(0, 0, 8, 3))
-	require.Equal(t, '▾', buffer.Cell(2, 0).Rune)
+	require.Equal(t, '▾', buffer.Cell(2, 2).Rune)
 }

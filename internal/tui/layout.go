@@ -82,6 +82,8 @@ func (flex *Flex) rects(rect Rect) []Rect {
 			}
 		}
 
+		size = max(0, min(size, available-cursor))
+
 		childRect := rect
 		if flex.Direction == FlexColumn {
 			childRect.Y += cursor

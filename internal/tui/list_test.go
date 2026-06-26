@@ -55,6 +55,36 @@ func TestListModelSelectionRenderingAndDraw(t *testing.T) {
 	require.Contains(t, emptyLines, "No matches")
 }
 
+func TestListRenderKeepsHeaderAndSelectionAtShortHeight(t *testing.T) {
+	t.Parallel()
+
+	items := []tui.ListItem{
+		testListItem("a", "Alpha", "first", testOne),
+		testListItem("b", "Beta", "second", "two"),
+		testListItem("g", "Gamma", "third", "three"),
+	}
+	list := tui.NewList("Pick", "Choose wisely", items, true)
+	list.ShowDetails = false
+	list.SetSelectedIndex(2)
+
+	// Height 7 is smaller than the box chrome; the render must keep the top
+	// border and title instead of front-trimming them, while still showing the
+	// selected item and never exceeding the viewport height.
+	hints := tui.ListHints{Up: "↑", Down: "↓", Confirm: testEnter, Cancel: testEsc}
+	lines := list.Render(listOptions(28, 7, hints))
+	require.NotEmpty(t, lines)
+	require.LessOrEqual(t, len(lines), 7)
+	require.True(t, strings.HasPrefix(lines[0].Text, "╭"))
+
+	rendered := strings.Join(lineTexts(lines), "\n")
+	require.Contains(t, rendered, "Pick")
+	require.Contains(t, rendered, "→ Gamma three")
+
+	buffer := tui.NewCellBuffer(28, 7, tcell.StyleDefault)
+	list.Draw(buffer, testRect(0, 0, 28, 7), nil, hints)
+	require.Equal(t, '╭', buffer.Cell(0, 0).Rune)
+}
+
 func TestListFilteringSelectionAndBackspace(t *testing.T) {
 	t.Parallel()
 

@@ -71,7 +71,13 @@ func (form *Form) Render(width, height int) []Line {
 		lines = append(lines, NewLine(form.Style, Truncate(text, width)))
 	}
 
-	return Tail(lines, height)
+	// Clip from the head so the title and top fields stay visible when the
+	// form overflows the viewport; Form has no scroll offset to reveal them.
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+
+	return lines
 }
 
 // Draw draws the form.

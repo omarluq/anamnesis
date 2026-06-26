@@ -21,6 +21,8 @@ const (
 
 	markdownQuote                    = "┃ "
 	markdownRule                     = "─"
+	markdownTaskChecked              = "☑ "
+	markdownTaskUnchecked            = "☐ "
 	markdownTableTransformerPriority = 200
 	markdownStrikePriority           = 500
 	markdownTableMaxHeight           = 10_000
@@ -270,34 +272,51 @@ func (renderer *markdownRenderer) inlineText(node ast.Node) string {
 	var builder strings.Builder
 
 	for child := node.FirstChild(); child != nil; child = child.NextSibling() {
-		switch typedChild := child.(type) {
-		case *ast.Text:
-			builder.Write(typedChild.Segment.Value(renderer.source))
-
-			if typedChild.SoftLineBreak() || typedChild.HardLineBreak() {
-				builder.WriteString(" ")
-			}
-		case *ast.CodeSpan:
-			builder.WriteString("`")
-			builder.WriteString(renderer.inlineText(typedChild))
-			builder.WriteString("`")
-		case *ast.String:
-			builder.Write(typedChild.Value)
-		case *ast.Link:
-			label := renderer.inlineText(typedChild)
-			builder.WriteString(label)
-
-			if len(typedChild.Destination) > 0 {
-				builder.WriteString(" (")
-				builder.Write(typedChild.Destination)
-				builder.WriteString(")")
-			}
-		default:
-			builder.WriteString(renderer.inlineText(typedChild))
-		}
+		builder.WriteString(renderer.inlineChild(child))
 	}
 
 	return strings.TrimSpace(builder.String())
+}
+
+func (renderer *markdownRenderer) inlineChild(child ast.Node) string {
+	switch typedChild := child.(type) {
+	case *ast.Text:
+		return renderer.inlineTextSegment(typedChild)
+	case *ast.CodeSpan:
+		return "`" + renderer.inlineText(typedChild) + "`"
+	case *ast.String:
+		return string(typedChild.Value)
+	case *extast.TaskCheckBox:
+		if typedChild.IsChecked {
+			return markdownTaskChecked
+		}
+
+		return markdownTaskUnchecked
+	case *ast.Link:
+		return renderer.inlineLink(typedChild)
+	default:
+		return renderer.inlineText(typedChild)
+	}
+}
+
+func (renderer *markdownRenderer) inlineTextSegment(node *ast.Text) string {
+	text := string(node.Segment.Value(renderer.source))
+
+	if node.SoftLineBreak() || node.HardLineBreak() {
+		text += " "
+	}
+
+	return text
+}
+
+func (renderer *markdownRenderer) inlineLink(node *ast.Link) string {
+	label := renderer.inlineText(node)
+
+	if len(node.Destination) > 0 {
+		label += " (" + string(node.Destination) + ")"
+	}
+
+	return label
 }
 
 func (renderer *markdownRenderer) codeBlockText(node ast.Node) string {
