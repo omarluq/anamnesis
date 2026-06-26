@@ -31,6 +31,7 @@ func CloneOrNil[V any](values map[string]V) map[string]V {
 }
 
 // IntMapToAnyMap copies integer map values into a JSON-friendly any map.
+// A nil input is normalized to a non-nil empty map, so the result is never nil.
 func IntMapToAnyMap(values map[string]int) map[string]any {
 	cloned := make(map[string]any, len(values))
 	for key, value := range values {
