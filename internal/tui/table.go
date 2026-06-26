@@ -40,7 +40,10 @@ type Table struct {
 	Alignments  []Alignment
 }
 
-// Render returns table lines clipped to width and height.
+// Render returns table lines clipped to width and height. The top border and
+// header are always rendered; only the data rows are clipped to the height that
+// remains after reserving a row for the bottom border, and every line is
+// truncated to width.
 func (table *Table) Render(width, height int) []Line {
 	if table == nil || width <= 0 || height <= 0 {
 		return []Line{}
@@ -54,22 +57,39 @@ func (table *Table) Render(width, height int) []Line {
 	colCount := table.columnCount(rows)
 	colWidths := table.columnWidths(rows, colCount, width)
 
-	lines := []Line{NewLine(table.BorderStyle, table.tableBorder("╭", "┬", "╮", colWidths))}
+	header := []Line{NewLine(table.BorderStyle, table.tableBorder("╭", "┬", "╮", colWidths))}
 	if len(table.Headers) > 0 {
-		lines = append(
-			lines,
+		header = append(
+			header,
 			table.renderRow(table.Headers, colWidths, table.HeaderStyle),
 			NewLine(table.BorderStyle, table.tableBorder("├", "┼", "┤", colWidths)),
 		)
 	}
 
-	for _, row := range table.Rows {
+	footer := NewLine(table.BorderStyle, table.tableBorder("╰", "┴", "╯", colWidths))
+
+	// Reserve one row for the bottom border and clip the data rows to the rest.
+	dataRows := table.Rows
+	if budget := max(0, height-len(header)-1); len(dataRows) > budget {
+		dataRows = dataRows[:budget]
+	}
+
+	lines := make([]Line, 0, len(header)+len(dataRows)+1)
+
+	lines = append(lines, header...)
+	for _, row := range dataRows {
 		lines = append(lines, table.renderRow(row, colWidths, table.Style))
 	}
 
-	lines = append(lines, NewLine(table.BorderStyle, table.tableBorder("╰", "┴", "╯", colWidths)))
+	lines = append(lines, footer)
 
-	return Tail(lines, height)
+	for index := range lines {
+		lines[index] = lines[index].Truncate(width)
+	}
+
+	// Head-clip so the top border and header survive viewports too short for the
+	// full chrome (Tail would drop them).
+	return lines[:min(len(lines), height)]
 }
 
 // Draw draws table into rect.

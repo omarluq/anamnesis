@@ -19,7 +19,9 @@ func TestTextViewRenderPlainRichAndDraw(t *testing.T) {
 	require.Equal(t, []string{testBeta, "gamma"}, lineTexts(plain))
 
 	view.Wrap = false
-	require.Equal(t, []string{"gamma"}, lineTexts(view.Render(6, 2)))
+	// Scroll past the content: with only 2 lines and a height of 2, the start is
+	// clamped to len-height (0) so the viewport shows the full last page.
+	require.Equal(t, []string{"alpha ", "gamma"}, lineTexts(view.Render(6, 2)))
 
 	rich := tui.NewTextView("").SetLines([]tui.Line{
 		{
@@ -37,6 +39,11 @@ func TestTextViewRenderPlainRichAndDraw(t *testing.T) {
 	rich.Draw(buffer, testRect(0, 0, 4, 2))
 	require.Equal(t, "red ", bufferLine(buffer, 0))
 	require.Equal(t, "gree", bufferLine(buffer, 1))
+
+	// With wrapping disabled, rich lines are fit to width (no ellipsis), matching
+	// the plain-text path instead of returning raw over-width lines.
+	rich.Wrap = false
+	require.Equal(t, []string{"red g"}, lineTexts(rich.Render(5, 3)))
 
 	richText := tui.NewRichText([]tui.Line{
 		tui.NewLine(tcell.StyleDefault, "a"),

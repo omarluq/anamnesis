@@ -181,7 +181,15 @@ func renderTextArea(value []rune, cursor, width, maxRows int, styles TextAreaSty
 
 	for _, bodyLine := range visibleLines {
 		bodyText := PadRight(bodyLine, innerWidth)
-		lines = append(lines, NewLine(styles.Body, "│ "+bodyText+" │"))
+		lines = append(lines, Line{
+			Text:  "│ " + bodyText + " │",
+			Style: styles.Body,
+			Spans: []Span{
+				{Text: "│", Style: styles.Border},
+				{Text: " " + bodyText + " ", Style: styles.Body},
+				{Text: "│", Style: styles.Border},
+			},
+		})
 	}
 
 	lines = append(lines, NewLine(styles.Border, BottomBorder(width)))

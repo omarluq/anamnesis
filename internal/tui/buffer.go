@@ -156,5 +156,27 @@ func (renderer *Renderer) Flush(frame *CellBuffer) {
 		}
 	}
 
+	renderer.clearStale(frame)
+
 	renderer.previous = frame.Clone()
+}
+
+// clearStale blanks cells that existed in the previous frame but fall outside
+// the new frame's bounds, so shrinking the frame never leaves stale glyphs on
+// the screen.
+func (renderer *Renderer) clearStale(frame *CellBuffer) {
+	previous := renderer.previous
+	if previous == nil || (previous.width <= frame.width && previous.height <= frame.height) {
+		return
+	}
+
+	for row := range previous.height {
+		for col := range previous.width {
+			if col < frame.width && row < frame.height {
+				continue
+			}
+
+			renderer.screen.SetContent(col, row, ' ', nil, tcell.StyleDefault)
+		}
+	}
 }

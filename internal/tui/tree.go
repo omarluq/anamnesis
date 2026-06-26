@@ -89,7 +89,14 @@ func (view *TreeView) Render(width, height int) []Line {
 		lines[index] = lines[index].Truncate(width)
 	}
 
-	return Tail(lines, height)
+	// Anchor to the top so the root and its ancestors stay visible when the
+	// tree overflows the viewport. Clip the overflowing rows off the bottom
+	// rather than dropping the top via Tail.
+	if len(lines) > height {
+		return lines[:height]
+	}
+
+	return lines
 }
 
 // Draw draws the tree into rect.

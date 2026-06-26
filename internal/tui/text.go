@@ -28,7 +28,12 @@ func Width(text string) int {
 		return 0
 	}
 
-	return displaywidth.String(text)
+	width := 0
+	for _, segment := range Segments(text) {
+		width += segment.Width
+	}
+
+	return width
 }
 
 // Segments splits text into terminal grapheme segments.
@@ -154,7 +159,7 @@ func wrapLogicalLineWithMode(line string, width int, preserveWhitespace bool) []
 
 		wrapped := JoinSegments(segments[:breakIndex])
 		if !preserveWhitespace {
-			wrapped = strings.TrimRight(wrapped, " ")
+			wrapped = strings.TrimRight(wrapped, " \t")
 		}
 
 		lines = append(lines, wrapped)

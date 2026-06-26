@@ -239,7 +239,7 @@ type ListRenderOptions struct {
 
 const (
 	listHorizontalPadding    = 4
-	listChromeRows           = 8
+	listMaxHeaderRows        = 5
 	listCenterDivisor        = 2
 	listPositionWidthDivisor = 4
 )
@@ -253,35 +253,56 @@ func (list *List) Render(options *ListRenderOptions) []Line {
 	width := max(1, options.Width)
 	height := max(1, options.Height)
 	contentWidth := max(1, width-listHorizontalPadding)
-	maxItems := max(1, height-listChromeRows)
-	lines := make([]Line, 0, min(height, maxItems+listChromeRows))
 
-	lines = append(lines,
-		NewLine(options.Styles.Border, TopBorder(width, "")),
-		listRow(list.Title, contentWidth, options.Styles.Accent.Bold(true), options.Styles.Border),
-	)
-	if list.Subtitle != "" {
-		lines = append(lines, listRow(list.Subtitle, contentWidth, options.Styles.Muted, options.Styles.Border))
-	}
-
-	if list.searchable {
-		lines = append(lines, listRow("Search: "+list.query, contentWidth, options.Styles.Text, options.Styles.Border))
-	}
-
-	lines = append(lines, NewLine(options.Styles.Border, MiddleBorder(width)))
-	lines = append(lines, list.itemLines(contentWidth, maxItems, &options.Styles)...)
-	lines = append(lines,
+	header := list.headerLines(width, contentWidth, &options.Styles)
+	footer := []Line{
 		list.hintLine(contentWidth, width, &options.Styles, options.Hints),
 		NewLine(options.Styles.Border, BottomBorder(width)),
-	)
+	}
 
-	return Tail(lines, height)
+	// Reserve the real chrome height (header + footer) and clip only the item
+	// section to the rows that remain. windowStart keeps the selected item in
+	// view, so cramped viewports retain the top border, title, and selection
+	// instead of front-trimming the frame's head away.
+	maxItems := max(1, height-len(header)-len(footer))
+	items := list.itemLines(contentWidth, maxItems, &options.Styles)
+
+	lines := make([]Line, 0, len(header)+len(items)+len(footer))
+	lines = append(lines, header...)
+	lines = append(lines, items...)
+	lines = append(lines, footer...)
+
+	// When the viewport cannot fit even the chrome, keep the head (top border
+	// and title) rather than the tail; DrawLines clips from the top too.
+	if len(lines) > height {
+		return lines[:height]
+	}
+
+	return lines
 }
 
 // Draw draws the list into rect.
 func (list *List) Draw(screen ContentSetter, rect Rect, styles *ListStyles, hints ListHints) {
 	options := ListRenderOptions{Styles: safeListStyles(styles), Hints: hints, Width: rect.Width, Height: rect.Height}
 	DrawLines(screen, rect, list.Render(&options))
+}
+
+func (list *List) headerLines(width, contentWidth int, styles *ListStyles) []Line {
+	lines := make([]Line, 0, listMaxHeaderRows)
+	lines = append(lines,
+		NewLine(styles.Border, TopBorder(width, "")),
+		listRow(list.Title, contentWidth, styles.Accent.Bold(true), styles.Border),
+	)
+
+	if list.Subtitle != "" {
+		lines = append(lines, listRow(list.Subtitle, contentWidth, styles.Muted, styles.Border))
+	}
+
+	if list.searchable {
+		lines = append(lines, listRow("Search: "+list.query, contentWidth, styles.Text, styles.Border))
+	}
+
+	return append(lines, NewLine(styles.Border, MiddleBorder(width)))
 }
 
 func listRow(text string, width int, contentStyle, borderStyle tcell.Style) Line {

@@ -23,6 +23,9 @@ func TestMarkdownViewRendersCommonBlocks(t *testing.T) {
 		"- bullet item",
 		"- second item",
 		"",
+		"- [x] done task",
+		"- [ ] pending task",
+		"",
 		"1. ordered item",
 		"2. next ordered",
 		"",
@@ -51,6 +54,8 @@ func TestMarkdownViewRendersCommonBlocks(t *testing.T) {
 	require.Contains(t, text, "`code`")
 	require.Contains(t, text, "┃ quoted text")
 	require.Contains(t, text, "• bullet item")
+	require.Contains(t, text, "☑ done task")
+	require.Contains(t, text, "☐ pending task")
 	require.Contains(t, text, "1. ordered item")
 	require.Contains(t, text, "────────")
 	require.Contains(t, text, "indented code")
