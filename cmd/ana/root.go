@@ -10,12 +10,14 @@ func newRootCmd() *cobra.Command {
 		Short:         "ana is a command line tool",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		Args:          cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return cmd.Help()
+			return runChat(cmd)
 		},
 	}
 
 	cmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file path")
+	cmd.AddCommand(newChatCmd())
 	cmd.AddCommand(newConfigCmd())
 	cmd.AddCommand(newVersionCmd())
 
