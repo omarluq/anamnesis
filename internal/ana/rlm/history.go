@@ -40,13 +40,14 @@ func Render(history []ControllerTurn) string {
 }
 
 // renderTurn renders the ASSISTANT and TOOL OUTPUT block for a single turn,
-// quoting stdout and substituting nilLiteral for an absent retval or error.
+// quoting the controller code and stdout so multi-line values stay on a single
+// line, and substituting nilLiteral for an absent retval or error.
 func renderTurn(turn ControllerTurn) string {
 	retval := mo.EmptyableToOption(turn.Retval).OrElse(nilLiteral)
 	failure := mo.EmptyableToOption(turn.Err).OrElse(nilLiteral)
 
 	return fmt.Sprintf(
-		"ASSISTANT (turn %d): %s\nTOOL OUTPUT (turn %d):\n  stdout: %q\n  retval: %s\n  error:  %s\n",
+		"ASSISTANT (turn %d): %q\nTOOL OUTPUT (turn %d):\n  stdout: %q\n  retval: %s\n  error:  %s\n",
 		turn.Index, turn.Code, turn.Index, turn.Stdout, retval, failure,
 	)
 }
