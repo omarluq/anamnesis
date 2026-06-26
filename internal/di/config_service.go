@@ -20,7 +20,7 @@ func NewConfigService(injector do.Injector) (*ConfigService, error) {
 
 	cfg, err := config.Load(path).Get()
 	if err != nil {
-		return nil, err
+		return nil, serviceError(err, "load config")
 	}
 
 	return &ConfigService{cfg: cfg}, nil
