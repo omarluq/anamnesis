@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/omarluq/anamnesis/internal/ana/journal"
 )
@@ -60,13 +61,14 @@ func TestQueryFilterFields(t *testing.T) {
 
 	since := time.Date(2026, time.June, 26, 8, 0, 0, 0, time.UTC)
 	until := time.Date(2026, time.June, 26, 10, 0, 0, 0, time.UTC)
+	maxPriority := 4
 	filter := journal.QueryFilter{
 		Since:       since,
 		Until:       until,
 		Unit:        "ssh.service",
 		BootID:      "boot-2",
 		Grep:        "Failed password",
-		MaxPriority: 4,
+		MaxPriority: &maxPriority,
 		Limit:       1000,
 	}
 
@@ -75,8 +77,17 @@ func TestQueryFilterFields(t *testing.T) {
 	assert.Equal(t, "ssh.service", filter.Unit)
 	assert.Equal(t, "boot-2", filter.BootID)
 	assert.Equal(t, "Failed password", filter.Grep)
-	assert.Equal(t, 4, filter.MaxPriority)
+	require.NotNil(t, filter.MaxPriority)
+	assert.Equal(t, 4, *filter.MaxPriority)
 	assert.Equal(t, 1000, filter.Limit)
+}
+
+func TestQueryFilterZeroValueHasNoPriorityConstraint(t *testing.T) {
+	t.Parallel()
+
+	var filter journal.QueryFilter
+
+	assert.Nil(t, filter.MaxPriority, "zero-value MaxPriority must be nil to mean no priority constraint")
 }
 
 func TestFieldConstants(t *testing.T) {
