@@ -43,6 +43,10 @@ type GoldenCase struct {
 	ExpectJudgeReject bool `json:"expect_judge_reject"`
 }
 
+// maxGoldenLineBytes caps a single JSONL record at 1 MiB so LoadCases can scan
+// rows far larger than bufio's 64 KiB default without failing on valid input.
+const maxGoldenLineBytes = 1 << 20
+
 // LoadCases reads path as JSONL — one GoldenCase object per non-blank line — and
 // returns the parsed cases, wrapping any read or decode failure with oops.
 func LoadCases(path string) ([]GoldenCase, error) {
@@ -57,6 +61,8 @@ func LoadCases(path string) ([]GoldenCase, error) {
 	var cases []GoldenCase
 
 	scanner := bufio.NewScanner(bytes.NewReader(data))
+	scanner.Buffer(make([]byte, 0, bufio.MaxScanTokenSize), maxGoldenLineBytes)
+
 	for lineNum := 1; scanner.Scan(); lineNum++ {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {

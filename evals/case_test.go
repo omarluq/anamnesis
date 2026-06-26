@@ -1,8 +1,10 @@
 package main_test
 
 import (
+	"bufio"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/samber/oops"
@@ -112,6 +114,24 @@ func TestLoadCasesSkipsBlankLines(t *testing.T) {
 	assert.Len(t, cases, 2)
 	assert.Equal(t, "s1-oom-cascade", cases[0].ID)
 	assert.Equal(t, "s2-boot-diff-bad", cases[1].ID)
+}
+
+func TestLoadCasesHandlesLargeLine(t *testing.T) {
+	t.Parallel()
+
+	// Pad judge_prompt_extension so the single JSONL record exceeds bufio's
+	// 64 KiB default scan-token limit, exercising the raised scanner buffer.
+	largeExtension := strings.Repeat("a", bufio.MaxScanTokenSize+1)
+	record := `{"id":"s1-large","scenario_class":1,` +
+		`"judge_prompt_extension":"` + largeExtension + `"}`
+	require.Greater(t, len(record), bufio.MaxScanTokenSize)
+
+	cases, err := evalmain.LoadCases(writeJSONL(t, record+"\n"))
+	require.NoError(t, err)
+	require.Len(t, cases, 1)
+
+	assert.Equal(t, "s1-large", cases[0].ID)
+	assert.Equal(t, largeExtension, cases[0].JudgePromptExtension)
 }
 
 func TestLoadCasesMalformedLineWrapsOops(t *testing.T) {
