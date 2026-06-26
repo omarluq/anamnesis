@@ -15,10 +15,13 @@ const (
 
 // chatPane renders rendered markdown answers above an editable composer.
 type chatPane struct {
-	view     *tui.MarkdownView
-	title    string
-	composer tui.TextArea
-	theme    Theme
+	view         *tui.MarkdownView
+	title        string
+	composer     tui.TextArea
+	caretColumn  int
+	caretRow     int
+	theme        Theme
+	caretVisible bool
 }
 
 // newChatPane returns a chat pane seeded with a welcome message.
@@ -32,14 +35,19 @@ func newChatPane(theme Theme, title string) *chatPane {
 			Text:   welcomeText,
 			Styles: theme.MarkdownStyles(),
 		},
-		composer: composer,
-		title:    title,
-		theme:    theme,
+		composer:     composer,
+		title:        title,
+		theme:        theme,
+		caretColumn:  0,
+		caretRow:     0,
+		caretVisible: false,
 	}
 }
 
 // Draw paints the chat box, answer view, and composer into rect.
 func (pane *chatPane) Draw(screen tui.ContentSetter, rect tui.Rect) {
+	pane.caretVisible = false
+
 	box := tui.NewBox(pane.title)
 	box.Style = pane.theme.fg(pane.theme.Border)
 	box.Draw(screen, rect)
@@ -84,7 +92,8 @@ func (pane *chatPane) composerEmpty() bool {
 	return pane.composer.Empty()
 }
 
-// drawComposer renders the bordered text area into rect.
+// drawComposer renders the bordered text area into rect and records where the
+// caret landed so the run loop can place the native terminal cursor there.
 func (pane *chatPane) drawComposer(screen tui.ContentSetter, rect tui.Rect) {
 	if rect.Empty() {
 		return
@@ -93,6 +102,17 @@ func (pane *chatPane) drawComposer(screen tui.ContentSetter, rect tui.Rect) {
 	maxRows := max(1, rect.Height-composerBorders)
 	rendered := pane.composer.Render(rect.Width, maxRows, pane.theme.TextAreaStyles())
 	tui.DrawLines(screen, rect, rendered.Lines)
+
+	pane.caretColumn = rect.X + min(rendered.CursorCol, rect.Width-1)
+	pane.caretRow = rect.Y + min(rendered.CursorRow, rect.Height-1)
+	pane.caretVisible = true
+}
+
+// cursorPosition reports the absolute screen coordinates of the composer caret
+// and whether the composer was drawn this frame, so the run loop can place the
+// native terminal cursor there.
+func (pane *chatPane) cursorPosition() (column, row int, visible bool) {
+	return pane.caretColumn, pane.caretRow, pane.caretVisible
 }
 
 // insert appends the printable text of keyEvent to the composer.

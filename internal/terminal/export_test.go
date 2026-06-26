@@ -64,6 +64,12 @@ func CostProbe(deltas ...[3]int64) CostSnapshot {
 // Loop runs the shell select loop on the injected screen.
 func (app *App) Loop(ctx context.Context) error { return app.loop(ctx) }
 
+// Draw renders one frame onto the injected screen, including native cursor placement.
+func (app *App) Draw() { app.draw() }
+
+// CursorPosition reports the composer caret's screen coordinates and visibility.
+func (app *App) CursorPosition() (column, row int, visible bool) { return app.chat.cursorPosition() }
+
 // Title returns the configured chat title.
 func (app *App) Title() string { return app.title }
 

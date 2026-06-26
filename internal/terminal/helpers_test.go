@@ -23,27 +23,33 @@ const loopTimeout = 2 * time.Second
 type fakeScreen struct {
 	tcell.Screen
 
-	events chan tcell.Event
-	cells  map[[2]int]rune
-	mu     sync.Mutex
-	width  int
-	height int
-	shows  int
-	syncs  int
+	events       chan tcell.Event
+	cells        map[[2]int]rune
+	mu           sync.Mutex
+	width        int
+	height       int
+	shows        int
+	syncs        int
+	cursorColumn int
+	cursorRow    int
+	cursorShown  bool
 }
 
 // newFakeScreen returns a fake screen sized width x height with a buffered event
 // channel so tests can inject events without blocking.
 func newFakeScreen(width, height int) *fakeScreen {
 	return &fakeScreen{
-		Screen: nil,
-		events: make(chan tcell.Event, 32),
-		cells:  map[[2]int]rune{},
-		mu:     sync.Mutex{},
-		width:  width,
-		height: height,
-		shows:  0,
-		syncs:  0,
+		Screen:       nil,
+		events:       make(chan tcell.Event, 32),
+		cells:        map[[2]int]rune{},
+		mu:           sync.Mutex{},
+		width:        width,
+		height:       height,
+		shows:        0,
+		syncs:        0,
+		cursorColumn: 0,
+		cursorRow:    0,
+		cursorShown:  false,
 	}
 }
 
@@ -81,6 +87,31 @@ func (screen *fakeScreen) SetContent(column, row int, primary rune, _ []rune, _ 
 	screen.mu.Lock()
 	screen.cells[[2]int{column, row}] = primary
 	screen.mu.Unlock()
+}
+
+// ShowCursor records the latest native cursor placement so tests can assert
+// where the composer caret was positioned.
+func (screen *fakeScreen) ShowCursor(column, row int) {
+	screen.mu.Lock()
+	screen.cursorColumn = column
+	screen.cursorRow = row
+	screen.cursorShown = true
+	screen.mu.Unlock()
+}
+
+// HideCursor records that the native cursor was hidden this frame.
+func (screen *fakeScreen) HideCursor() {
+	screen.mu.Lock()
+	screen.cursorShown = false
+	screen.mu.Unlock()
+}
+
+// cursor returns the last recorded native cursor placement and visibility.
+func (screen *fakeScreen) cursor() (column, row int, shown bool) {
+	screen.mu.Lock()
+	defer screen.mu.Unlock()
+
+	return screen.cursorColumn, screen.cursorRow, screen.cursorShown
 }
 
 // inject pushes an event onto the screen's event channel.
