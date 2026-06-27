@@ -72,7 +72,12 @@ func scoreCase(
 	run RunOutput,
 	cost RunCost,
 ) (CaseResult, error) {
-	tier1 := Tier1(run, golden.ExpectedTools, golden.MinRecursionDepth)
+	requiredDepth := golden.MinRecursionDepth
+	if golden.MustRecurse && requiredDepth < 1 {
+		requiredDepth = 1
+	}
+
+	tier1 := Tier1(run, golden.ExpectedTools, requiredDepth)
 	tier2 := Tier2(run.Answer, golden.ExpectedKeywords, golden.ForbiddenKeywords)
 
 	tier3, err := Tier3(ctx, judge, golden.UserQuery, run.Answer, golden.JudgePromptExtension)

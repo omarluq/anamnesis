@@ -19,6 +19,9 @@ const (
 	// maxQueryLimit is the hard ceiling Query clamps any larger Limit down to,
 	// matching the journal package's documented maximum.
 	maxQueryLimit = 10000
+	// maxPriorityLevel is the highest (least severe) syslog PRIORITY, debug; it
+	// caps a MaxPriority ceiling, matching the journal package's PRIORITY clamp.
+	maxPriorityLevel = 7
 )
 
 // Journal is the read-only journald query surface the eval harness depends on.
@@ -236,10 +239,18 @@ func matchesScope(entry *journal.Entry, filter *journal.QueryFilter) bool {
 }
 
 // matchesPriority reports whether entry is within the priority ceiling. A nil
-// ceiling imposes no constraint; otherwise the entry's PRIORITY must be at most
-// the dereferenced value (numerically lower priorities are more severe).
+// ceiling imposes no constraint; otherwise the dereferenced value is clamped to
+// [0, maxPriorityLevel] — mirroring the journal package's PRIORITY disjunction so
+// the fixture stays substitutable — and the entry's PRIORITY must be at most that
+// ceiling (numerically lower priorities are more severe).
 func matchesPriority(entry *journal.Entry, maxPriority *int) bool {
-	return maxPriority == nil || entry.Priority <= *maxPriority
+	if maxPriority == nil {
+		return true
+	}
+
+	ceiling := max(0, min(*maxPriority, maxPriorityLevel))
+
+	return entry.Priority <= ceiling
 }
 
 // matchesWindow reports whether entry's timestamp lies within the inclusive
@@ -293,19 +304,44 @@ func effectiveLimit(limit int) int {
 // a Counts histogram or a Unique set groups on. Only the fields the harness
 // groups by are mapped; any other name yields the empty string.
 func fieldValue(entry *journal.Entry, field string) string {
+	if value, ok := stringField(entry, field); ok {
+		return value
+	}
+
+	return numericField(entry, field)
+}
+
+// stringField returns the plain string-valued journald fields, reporting whether
+// field named one of them so fieldValue can fall through to the numeric group.
+func stringField(entry *journal.Entry, field string) (string, bool) {
 	switch field {
+	case journal.FieldCursor:
+		return entry.Cursor, true
 	case journal.FieldUnit:
-		return entry.Unit
+		return entry.Unit, true
 	case journal.FieldBootID:
-		return entry.BootID
+		return entry.BootID, true
 	case journal.FieldComm:
-		return entry.Comm
+		return entry.Comm, true
 	case journal.FieldHostname:
-		return entry.Hostname
+		return entry.Hostname, true
+	case journal.FieldMessage:
+		return entry.Message, true
+	default:
+		return "", false
+	}
+}
+
+// numericField renders the numeric and timestamp journald fields as strings,
+// yielding the empty string for any field the harness does not group by.
+func numericField(entry *journal.Entry, field string) string {
+	switch field {
 	case journal.FieldPriority:
 		return strconv.Itoa(entry.Priority)
 	case journal.FieldPID:
 		return strconv.Itoa(entry.PID)
+	case journal.FieldRealtime:
+		return strconv.FormatInt(entry.Timestamp.UnixMicro(), 10)
 	default:
 		return ""
 	}
