@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/samber/oops"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -200,6 +201,84 @@ func TestJudgeHandlesAnswerWithNoCitations(t *testing.T) {
 
 	assert.False(t, result.Verdict.Approve, "an uncited answer is rejected")
 	assert.NotEmpty(t, result.Verdict.Critique, "the rejection explains the missing grounding")
+
+	transport.AssertExpectations(t)
+	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
+}
+
+func TestJudgeSurfacesCallFailure(t *testing.T) {
+	t.Parallel()
+
+	const errorBody = `{"error":{"message":"The model gpt-5.5 does not exist or you do not have access to it.",` +
+		`"type":"invalid_request_error","param":null,"code":"model_not_found"}}`
+
+	transport := new(mockTransport)
+	transport.
+		On("RoundTrip", mock.Anything).
+		Return(http.StatusNotFound, errorBody, nil).
+		Once()
+
+	client := newControllerClient(t, transport)
+
+	result, err := client.Judge(
+		context.Background(),
+		"Why did nginx fail to start?",
+		"nginx died because its configuration was invalid.",
+		[]string{"nginx.service: invalid configuration directive"},
+	)
+	require.Error(t, err)
+
+	assert.Equal(t, openai.JudgeResult{
+		Verdict: openai.JudgeVerdict{Approve: false, Critique: ""},
+		Usage:   openai.Usage{TokensIn: 0, TokensOut: 0},
+	}, result, "a failed judge call yields the zero result")
+
+	oopsErr, ok := oops.AsOops(err)
+	require.True(t, ok, "the error is oops-wrapped")
+	assert.Equal(t, "openai", oopsErr.Domain())
+	assert.Equal(t, "judge_call_failed", oopsErr.Code())
+
+	transport.AssertExpectations(t)
+	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
+}
+
+func TestJudgeSurfacesDecodeFailure(t *testing.T) {
+	t.Parallel()
+
+	malformedBody := fmt.Sprintf(
+		`{"id":"resp_judge","object":"response","created_at":1,"status":"completed",`+
+			`"model":%q,"output":[{"id":"msg_judge","type":"message","role":"assistant",`+
+			`"status":"completed","content":[{"type":"output_text","text":%q,"annotations":[]}]}],`+
+			`"usage":{"input_tokens":10,"output_tokens":2,"total_tokens":12,`+
+			`"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":0}}}`,
+		openai.Model, "this is prose, not a JudgeVerdict JSON object",
+	)
+
+	transport := new(mockTransport)
+	transport.
+		On("RoundTrip", mock.Anything).
+		Return(http.StatusOK, malformedBody, nil).
+		Once()
+
+	client := newControllerClient(t, transport)
+
+	result, err := client.Judge(
+		context.Background(),
+		"What killed the database process?",
+		"postgres was OOM-killed under memory pressure.",
+		[]string{"postgres.service: out of memory, killed process 4242"},
+	)
+	require.Error(t, err)
+
+	assert.Equal(t, openai.JudgeResult{
+		Verdict: openai.JudgeVerdict{Approve: false, Critique: ""},
+		Usage:   openai.Usage{TokensIn: 0, TokensOut: 0},
+	}, result, "a verdict that fails to decode yields the zero result")
+
+	oopsErr, ok := oops.AsOops(err)
+	require.True(t, ok, "the error is oops-wrapped")
+	assert.Equal(t, "openai", oopsErr.Domain())
+	assert.Equal(t, "judge_decode", oopsErr.Code())
 
 	transport.AssertExpectations(t)
 	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
