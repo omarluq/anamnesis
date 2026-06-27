@@ -174,8 +174,8 @@ func TestAgentFinalVarRendersNonStringVariable(t *testing.T) {
 }
 
 // TestFinalWithoutAgentReportsNoAnswer proves Interpreter.Final returns no answer
-// when no agent was ever registered on the interpreter — the agentBindings miss
-// path — rather than faulting on the absent binding.
+// when no agent was ever registered on the interpreter — the unset interpreter
+// agent path — rather than faulting on the absent binding.
 func TestFinalWithoutAgentReportsNoAnswer(t *testing.T) {
 	t.Parallel()
 

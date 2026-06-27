@@ -5,7 +5,6 @@ import (
 	"go/token"
 	"reflect"
 	"strings"
-	"sync"
 
 	"github.com/mvm-sh/mvm/symbol"
 
@@ -35,12 +34,6 @@ const (
 	// finalVariable means agent.FINAL_VAR named a REPL variable holding the answer.
 	finalVariable
 )
-
-// agentBindings associates each interpreter with the Agent registered on it, so
-// Interpreter.Final can resolve the terminal answer without the Interpreter
-// struct carrying agent-specific fields. An Interpreter is session-scoped and
-// not safe for concurrent use, so at most one Agent is ever bound per key.
-var agentBindings sync.Map
 
 // Agent is the §7 RLM primitive façade interpreted source drives to end a turn:
 // FINAL and FINAL_VAR record the terminal answer and Cite attaches evidence to
@@ -85,7 +78,7 @@ func RegisterAgent(interpreter *Interpreter, sink CitationSink) *Agent {
 
 	mergeQuerySurface(interpreter, symbols)
 	importSurface(interpreter, "agent", symbols)
-	agentBindings.Store(interpreter, agent)
+	interpreter.agent = agent
 
 	return agent
 }
@@ -128,18 +121,11 @@ func (agent *Agent) resolve(interpreter *Interpreter) (string, bool) {
 }
 
 // loadAgent returns the Agent bound to interpreter and true, or nil and false when
-// none is bound. It centralizes the agentBindings lookup and type assertion that
-// both Interpreter.Final and the query surface's mergeAgentSurface rely on, so the
-// load-and-assert dance lives in one place.
+// none is bound. It centralizes the interpreter-owned binding read that both
+// Interpreter.Final and the query surface's mergeAgentSurface rely on, so the
+// nil-check lives in one place.
 func loadAgent(interpreter *Interpreter) (*Agent, bool) {
-	bound, found := agentBindings.Load(interpreter)
-	if !found {
-		return nil, false
-	}
-
-	agent, ok := bound.(*Agent)
-
-	return agent, ok
+	return interpreter.agent, interpreter.agent != nil
 }
 
 // Final returns the terminal answer the controller signaled through agent.FINAL
