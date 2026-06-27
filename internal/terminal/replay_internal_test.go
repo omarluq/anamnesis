@@ -115,13 +115,20 @@ func TestReplayControllerDeliversEventsUnderPace(t *testing.T) {
 	// A tiny real pace lets the timer fire between events, exercising the timer.C
 	// success branch of wait(); drainTrace's loopTimeout bounds the test so a
 	// regression that never delivered would fail fast instead of hanging.
+	pace := 20 * time.Millisecond
 	controller := newReplayController([]TraceEvent{
 		replayLine(TraceKindTurn, "a", 0),
 		replayLine(TraceKindFinal, "b", 0),
-	}, time.Millisecond)
+	}, pace)
 
+	start := time.Now()
 	got := drainTrace(t, controller.Start(context.Background(), "q", 1))
+	elapsed := time.Since(start)
 
+	// Pacing must actually delay delivery: one beat precedes each of the two
+	// events, so the drain cannot finish in less than two paces. A regression
+	// that bypassed wait() would return early and trip this lower bound.
+	assert.GreaterOrEqual(t, elapsed, 2*pace, "paced delivery waits a beat before each event")
 	require.Len(t, got, 2, "every paced event is delivered before the channel closes")
 	assert.Equal(t, TraceKindTurn, got[0].Kind)
 	assert.Equal(t, TraceKindFinal, got[1].Kind)
