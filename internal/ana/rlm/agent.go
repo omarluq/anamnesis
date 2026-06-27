@@ -90,16 +90,18 @@ func (agent *Agent) Query(prompt string, ctx any) string {
 
 // QueryBatched is the parallel fan-out of Query: it runs one sub-LLM call per
 // (prompt, ctx) pair, each in its own host goroutine, and returns the answers in
-// input order. Every pair reserves one sub-call against the budget and emits its
-// own sub-call trace event, so a batch of N pairs spends exactly N of the
-// sub-call budget. It implements the §7 agent.QueryBatched primitive, so it takes
-// no Go context. It collapses N round-trips of latency into roughly one (SPEC
-// §18) while keeping the shared counters and store concurrency-safe: the budget
-// counters are atomic and the citation store is mutex-guarded, so the fan-out
-// never races them. It panics with a clear oops error when prompts and ctxs
-// differ in length, when the sub-call budget cannot cover a pair, or when a
-// sub-LLM call fails, matching Query's fail-loud contract so the controller loop
-// surfaces the fault as a turn error.
+// input order. It first reserves the whole batch against the sub-call budget in one
+// atomic admission step, so a batch the remaining budget cannot cover is rejected
+// before any goroutine starts and never burns a partial, scheduler-dependent number
+// of sub-calls; an admitted batch of N pairs then spends exactly N and emits one
+// sub-call trace event per pair. It implements the §7 agent.QueryBatched primitive,
+// so it takes no Go context. It collapses N round-trips of latency into roughly one
+// (SPEC §18) while keeping the shared counters and store concurrency-safe: the
+// budget counters are atomic and the citation store is mutex-guarded, so the fan-out
+// never races them. It panics with a clear oops error when prompts and ctxs differ
+// in length, when the remaining sub-call budget cannot cover the whole batch, or
+// when a sub-LLM call fails, matching Query's fail-loud contract so the controller
+// loop surfaces the fault as a turn error.
 func (agent *Agent) QueryBatched(prompts []string, ctxs []any) []string {
 	if len(prompts) != len(ctxs) {
 		panic(oops.
@@ -107,6 +109,14 @@ func (agent *Agent) QueryBatched(prompts []string, ctxs []any) []string {
 			Code("agent_batch_mismatch").
 			Errorf("agent.QueryBatched needs one ctx per prompt: got %d prompts and %d ctxs",
 				len(prompts), len(ctxs)))
+	}
+
+	if agent.budget.ReserveSubCalls(len(prompts)) != nil {
+		panic(oops.
+			In("rlm").
+			Code("agent_sub_call_budget").
+			Errorf("agent.QueryBatched of %d exceeds the remaining sub-call budget of %d",
+				len(prompts), agent.budget.MaxSubCalls))
 	}
 
 	answers := make([]string, len(prompts))
@@ -120,7 +130,7 @@ func (agent *Agent) QueryBatched(prompts []string, ctxs []any) []string {
 		go func() {
 			defer waitGroup.Done()
 
-			answers[index], failures[index] = agent.queryOne(prompts[index], ctxs[index])
+			answers[index], failures[index] = agent.dispatch(prompts[index], ctxs[index])
 		}()
 	}
 
@@ -173,12 +183,12 @@ func (agent *Agent) Variable() (string, bool) {
 	return agent.varName, agent.kind == finalVariable
 }
 
-// queryOne makes one recursive sub-LLM call shared by Query and the QueryBatched
-// fan-out: it reserves one sub-call, emits its trace event, and returns the
-// sub-LLM's answer, or a clear oops error when the budget is spent or the sub-LLM
-// call fails. Returning the fault instead of panicking lets QueryBatched join
-// every goroutine and raise one deterministic panic from the calling goroutine,
-// while Query turns the same fault straight into its own panic.
+// queryOne makes one recursive sub-LLM call for the single-shot Query path: it
+// reserves one sub-call against the budget, then dispatches it. Returning the fault
+// instead of panicking lets Query turn an exhausted budget or a failed sub-LLM call
+// straight into its own panic. QueryBatched does not route through queryOne — it
+// reserves the whole batch up front and calls dispatch directly — so a rejected
+// batch can never burn a partial sub-call.
 func (agent *Agent) queryOne(prompt string, ctx any) (string, error) {
 	if agent.budget.ReserveSubCall() != nil {
 		return "", oops.
@@ -187,6 +197,16 @@ func (agent *Agent) queryOne(prompt string, ctx any) (string, error) {
 			Errorf("agent sub-call exhausted the sub-call budget of %d", agent.budget.MaxSubCalls)
 	}
 
+	return agent.dispatch(prompt, ctx)
+}
+
+// dispatch makes one already-reserved recursive sub-LLM call: it emits the sub-call
+// trace event and returns the sub-LLM's answer, or a clear oops error when the
+// sub-LLM call fails. Admission against the sub-call budget is the caller's job —
+// queryOne reserves a single call for Query and QueryBatched reserves the whole batch
+// up front — so dispatch never touches the budget and stays the shared tail both
+// paths run once their reservation has been granted.
+func (agent *Agent) dispatch(prompt string, ctx any) (string, error) {
 	agent.emitter.SubCall(prompt)
 
 	answer, err := agent.subCall(prompt, fmt.Sprint(ctx))

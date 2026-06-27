@@ -36,6 +36,35 @@ type Deps struct {
 	RunID uint64
 }
 
+// validate rejects a Deps that is nil or missing any collaborator, returning the
+// rlm-tagged assembly error Investigate surfaces before it dereferences a field, so
+// an incomplete wiring fails loudly at the boundary instead of panicking deep inside
+// an adapter on its first use. A nil receiver is reported the same way as a missing
+// field, since both mean a run cannot be assembled.
+func (deps *Deps) validate() error {
+	if deps == nil {
+		return oops.
+			In("rlm").
+			Code("investigate_deps_missing").
+			Errorf("investigate requires non-nil dependencies")
+	}
+
+	missing := deps.Controller == nil ||
+		deps.Sub == nil ||
+		deps.Judge == nil ||
+		deps.Journal == nil ||
+		deps.Systemd == nil ||
+		deps.Events == nil
+	if missing {
+		return oops.
+			In("rlm").
+			Code("investigate_deps_missing").
+			Errorf("investigate requires every dependency to be supplied")
+	}
+
+	return nil
+}
+
 // Investigate assembles and runs one RLM investigation of question end to end: it
 // builds the citation store and trace emitter, wires an mvm REPL session over the
 // host surfaces with a visibility-recording journal and a sub-call seam that emits
@@ -46,6 +75,10 @@ type Deps struct {
 // event, or an oops error tagged with the rlm domain when the session cannot be
 // assembled or the loop fails.
 func Investigate(ctx context.Context, question string, deps *Deps) (string, error) {
+	if err := deps.validate(); err != nil {
+		return "", err
+	}
+
 	budget := NewBudget()
 
 	ctx, cancel := context.WithTimeout(ctx, budget.WallTimeout)
