@@ -30,8 +30,12 @@ const ControllerSystemPrompt = "" +
 	"  BootInfo { ID string; Index int; FirstSeen time.Time; LastSeen time.Time }\n" +
 	"  Entry    { Cursor, BootID, Unit, Message, Comm, Hostname string; Priority, " +
 	"PID int; Timestamp time.Time }\n" +
-	"  QueryFilter { BootID, Unit, Grep string; MaxPriority, Limit int; Since, Until " +
-	"time.Time }\n" +
+	"  QueryFilter { BootID, Unit, Grep string; MaxPriority *int; Limit int; Since, " +
+	"Until time.Time }\n" +
+	"\n" +
+	"MaxPriority is *int. new(4) allocates an int 4 and yields *int (Go 1.26), so " +
+	"write journal.QueryFilter{MaxPriority: new(4)}. A nil MaxPriority means no " +
+	"priority ceiling, keeping 0 (emerg) distinct from unset.\n" +
 	"\n" +
 	"## systemd\n" +
 	"- systemd.UnitStatus(name string) UnitStatus\n" +
@@ -93,7 +97,7 @@ const ControllerSystemPrompt = "" +
 	"the most recent first; index 0 is the running boot, -1 is the previous, etc.\n" +
 	"- A unit is a systemd-managed service/socket/timer/etc.\n" +
 	"- Priority is syslog priority. 0 emerg, 1 alert, 2 crit, 3 err, 4 warning, 5 " +
-	"notice, 6 info, 7 debug. For most investigation: MaxPriority: 4.\n" +
+	"notice, 6 info, 7 debug. For most investigation: MaxPriority: new(4).\n" +
 	"- Entries are ordered by realtime timestamp; __CURSOR is the stable handle.\n" +
 	"\n" +
 	"# Investigation discipline\n" +
