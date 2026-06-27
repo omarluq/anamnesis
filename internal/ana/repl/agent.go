@@ -1,0 +1,169 @@
+package repl
+
+import (
+	"fmt"
+	"reflect"
+	"sync"
+
+	"github.com/omarluq/anamnesis/internal/ana/journal"
+)
+
+// CitationSink records the journal entries interpreted code attaches to the
+// final answer through agent.Cite. The repl package owns this seam so a session
+// forwards citations to the real citations.Store in production and to a test
+// double under test. Calls accumulate; the sink validates the cited cursors
+// against the session-visible queries later.
+type CitationSink interface {
+	// Cite records entries, by their cursor, as evidence for the final answer.
+	Cite(entries []journal.Entry)
+}
+
+// finalKind records which terminal primitive, if any, interpreted code has
+// called to end the investigation, so Interpreter.Final knows how to resolve the
+// answer.
+type finalKind uint8
+
+const (
+	// finalPending means no terminal primitive has been called yet.
+	finalPending finalKind = iota
+	// finalLiteral means agent.FINAL supplied the answer as a literal string.
+	finalLiteral
+	// finalVariable means agent.FINAL_VAR named a REPL variable holding the answer.
+	finalVariable
+)
+
+// agentBindings associates each interpreter with the Agent registered on it, so
+// Interpreter.Final can resolve the terminal answer without the Interpreter
+// struct carrying agent-specific fields. An Interpreter is session-scoped and
+// not safe for concurrent use, so at most one Agent is ever bound per key.
+var agentBindings sync.Map
+
+// Agent is the §7 RLM primitive façade interpreted source drives to end a turn:
+// FINAL and FINAL_VAR record the terminal answer and Cite attaches evidence to
+// it. RegisterAgent exposes the three as the interpreted agent package, so the
+// controller writes agent.FINAL("..."), agent.FINAL_VAR("var") and
+// agent.Cite(entries). The zero value is not usable; build one with RegisterAgent
+// so its citation sink is wired and it is bound to its interpreter.
+type Agent struct {
+	// sink receives the entries Cite attaches to the final answer.
+	sink CitationSink
+	// answer holds the literal answer once FINAL recorded it.
+	answer string
+	// varName holds the REPL variable name once FINAL_VAR recorded it.
+	varName string
+	// kind tracks which terminal primitive, if any, has been called.
+	kind finalKind
+}
+
+// RegisterAgent exposes the agent RLM primitive surface to interpreter so
+// controller source can call agent.FINAL, agent.FINAL_VAR and agent.Cite by
+// name, forwarding citations to sink. It binds the returned Agent to interpreter:
+// Interpreter.Final later resolves the terminal answer the Agent records, reading
+// the named REPL variable for an answer assembled across turns by FINAL_VAR.
+func RegisterAgent(interpreter *Interpreter, sink CitationSink) *Agent {
+	agent := &Agent{
+		sink:    sink,
+		answer:  "",
+		varName: "",
+		kind:    finalPending,
+	}
+
+	symbols := map[string]reflect.Value{
+		"FINAL":     reflect.ValueOf(agent.recordFinal),
+		"FINAL_VAR": reflect.ValueOf(agent.recordFinalVar),
+		"Cite":      reflect.ValueOf(agent.cite),
+	}
+
+	importSurface(interpreter, "agent", symbols)
+	agentBindings.Store(interpreter, agent)
+
+	return agent
+}
+
+// recordFinal backs agent.FINAL: it records answer as the literal terminal
+// answer. The controller calls it once it has the conclusion in hand.
+func (agent *Agent) recordFinal(answer string) {
+	agent.answer = answer
+	agent.kind = finalLiteral
+}
+
+// recordFinalVar backs agent.FINAL_VAR: it records that the answer is the current
+// value of the REPL variable named varname, resolved when Interpreter.Final runs.
+// It is the terminal signal for an answer the controller assembled across turns.
+func (agent *Agent) recordFinalVar(varname string) {
+	agent.varName = varname
+	agent.kind = finalVariable
+}
+
+// cite backs agent.Cite: it forwards entries to the citation sink, which
+// accumulates them as evidence for the final answer.
+func (agent *Agent) cite(entries []journal.Entry) {
+	agent.sink.Cite(entries)
+}
+
+// resolve returns the terminal answer and true once a terminal primitive has
+// been called, or the empty string and false otherwise. A FINAL_VAR answer is
+// read back from interpreter as the current value of the named REPL variable.
+func (agent *Agent) resolve(interpreter *Interpreter) (string, bool) {
+	switch agent.kind {
+	case finalLiteral:
+		return agent.answer, true
+	case finalVariable:
+		return interpreter.variableString(agent.varName)
+	case finalPending:
+		return "", false
+	default:
+		return "", false
+	}
+}
+
+// loadAgent returns the Agent bound to interpreter and true, or nil and false when
+// none is bound. It centralizes the agentBindings lookup and type assertion that
+// both Interpreter.Final and the query surface's mergeAgentSurface rely on, so the
+// load-and-assert dance lives in one place.
+func loadAgent(interpreter *Interpreter) (*Agent, bool) {
+	bound, found := agentBindings.Load(interpreter)
+	if !found {
+		return nil, false
+	}
+
+	agent, ok := bound.(*Agent)
+
+	return agent, ok
+}
+
+// Final returns the terminal answer the controller signaled through agent.FINAL
+// or agent.FINAL_VAR and true, or the empty string and false when no agent is
+// registered or no terminal primitive has run yet. For a FINAL_VAR signal it
+// reads the current value of the named REPL variable, so an answer the
+// controller built across turns resolves to that variable's final string.
+func (interpreter *Interpreter) Final() (string, bool) {
+	agent, ok := loadAgent(interpreter)
+	if !ok {
+		return "", false
+	}
+
+	return agent.resolve(interpreter)
+}
+
+// variableString evaluates the REPL variable named name against the session
+// state and renders its current value as a string. It returns false when the
+// variable is unbound, the evaluation faults, or the value cannot be read, so a
+// FINAL_VAR pointed at a missing variable degrades to "no answer" rather than a
+// panic.
+func (interpreter *Interpreter) variableString(name string) (string, bool) {
+	value, err := interpreter.engine.Eval("agent_final_var", name)
+	if err != nil || !value.IsValid() {
+		return "", false
+	}
+
+	if value.Kind() == reflect.String {
+		return value.String(), true
+	}
+
+	if value.CanInterface() {
+		return fmt.Sprint(value.Interface()), true
+	}
+
+	return "", false
+}
