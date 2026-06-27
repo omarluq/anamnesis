@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/samber/lo"
 	"github.com/samber/oops"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -40,12 +41,9 @@ func entryWithCursor(cursor string) journal.Entry {
 
 // entriesWithCursors maps cursors to entries via entryWithCursor in order.
 func entriesWithCursors(cursors ...string) []journal.Entry {
-	entries := make([]journal.Entry, 0, len(cursors))
-	for _, cursor := range cursors {
-		entries = append(entries, entryWithCursor(cursor))
-	}
-
-	return entries
+	return lo.Map(cursors, func(cursor string, _ int) journal.Entry {
+		return entryWithCursor(cursor)
+	})
 }
 
 func TestStoreValidateAcceptsRecordedCursors(t *testing.T) {
@@ -121,6 +119,19 @@ func TestStoreValidateEmptyStore(t *testing.T) {
 
 	store := citations.NewStore()
 
+	assert.NoError(t, store.Validate())
+}
+
+func TestStoreZeroValueRecordVisibleIsSafe(t *testing.T) {
+	t.Parallel()
+
+	var store citations.Store
+
+	store.RecordVisible(entriesWithCursors(cursorOne))
+	store.Cite(entriesWithCursors(cursorOne))
+
+	// A zero-value Store lazily initializes its visible set, so recording then
+	// citing the same cursor must validate instead of panicking on a nil map.
 	assert.NoError(t, store.Validate())
 }
 
