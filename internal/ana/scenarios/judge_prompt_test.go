@@ -26,6 +26,13 @@ func TestJudgeSystemPromptStructure(t *testing.T) {
 func TestJudgeSystemPromptOutputKeys(t *testing.T) {
 	t.Parallel()
 
+	prompt := scenarios.JudgeSystemPrompt
+
+	assert.Contains(t, prompt, "Respond in JSON:",
+		"prompt must explicitly require JSON-shaped output")
+	assert.Contains(t, prompt, `"approve": true | false`,
+		"prompt must shape the verdict as a boolean approve field")
+
 	keys := []string{`"approve"`, `"critique"`}
 
 	require.Len(t, keys, 2, "both output JSON keys must be covered")
@@ -34,7 +41,7 @@ func TestJudgeSystemPromptOutputKeys(t *testing.T) {
 		t.Run(want, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Contains(t, scenarios.JudgeSystemPrompt, want)
+			assert.Contains(t, prompt, want)
 		})
 	}
 }
