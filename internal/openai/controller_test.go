@@ -50,6 +50,20 @@ type mockTransport struct {
 // is created and owned at the point it is returned.
 func (m *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	args := m.Called(req)
+
+	// Honor the http.RoundTripper contract: drain and close the request body so a
+	// reader is never leaked across repeated calls. Tests read req.Body inside the
+	// synchronous .Run callback above, so the body is already at EOF by here.
+	if req.Body != nil {
+		if _, err := io.Copy(io.Discard, req.Body); err != nil {
+			return nil, err
+		}
+
+		if err := req.Body.Close(); err != nil {
+			return nil, err
+		}
+	}
+
 	if err := args.Error(2); err != nil {
 		return nil, err
 	}
