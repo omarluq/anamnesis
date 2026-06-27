@@ -20,6 +20,10 @@ import (
 // Each Eval runs a named source fragment against the shared session state and
 // captures its output into per-turn buffers. The zero value is not usable;
 // construct one with NewInterpreter.
+//
+// An Interpreter is not safe for concurrent use: Eval mutates the shared engine
+// and resets the per-turn output buffers, so a single caller must serialize its
+// Eval calls, as the RLM controller does by evaluating one turn at a time.
 type Interpreter struct {
 	engine *interp.Interp
 	stdout bytes.Buffer
