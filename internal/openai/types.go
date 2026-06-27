@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/samber/lo"
+	"github.com/samber/oops"
 )
 
 // Model is the OpenAI model id every role runs on — controller, sub-LLM, and
@@ -36,7 +36,8 @@ const (
 const descriptionPrefix = "description="
 
 // jsonTypeByKind maps the Go reflect kinds GenerateSchema understands to their
-// JSON Schema type names. Kinds absent from the map fall back to a string type.
+// JSON Schema type names. Kinds absent from the map are unsupported and make
+// schema generation fail loudly rather than silently coercing to a string.
 var jsonTypeByKind = map[reflect.Kind]string{
 	reflect.Bool:    jsonTypeBoolean,
 	reflect.String:  jsonTypeString,
@@ -68,29 +69,46 @@ type ControllerResponse struct {
 }
 
 // GenerateSchema reflects the struct type T into a JSON Schema document for the
-// OpenAI Responses API structured-output contract: it marks every field required
-// and sets additionalProperties to false, the strict subset the Responses API
-// enforces. T must be a struct type.
-func GenerateSchema[T any]() map[string]any {
+// OpenAI Responses API structured-output contract: it marks every exported
+// JSON-visible field required and sets additionalProperties to false, the strict
+// subset the Responses API enforces. It returns an error when a field's type maps
+// to no supported JSON Schema type, so the contract never silently coerces an
+// unmappable field into a string the decoder cannot read back. T must be a struct
+// type.
+func GenerateSchema[T any]() (map[string]any, error) {
 	return schemaForType(reflect.TypeFor[T]())
 }
 
 // schemaForType builds the object schema for a struct type, one property per
-// JSON-visible field, with every property required and additionalProperties off.
-func schemaForType(typ reflect.Type) map[string]any {
+// exported JSON-visible field, with every property required and
+// additionalProperties off. Unexported fields are skipped because encoding/json
+// never marshals them, and embedded unexported fields fall out the same way. It
+// returns an error when a field's type has no supported JSON Schema mapping.
+func schemaForType(typ reflect.Type) (map[string]any, error) {
 	fieldCount := typ.NumField()
 	properties := make(map[string]any, fieldCount)
 	required := make([]string, 0, fieldCount)
 
 	for index := range fieldCount {
 		field := typ.Field(index)
+		if !field.IsExported() {
+			continue
+		}
 
 		name := jsonFieldName(field.Tag.Get("json"), field.Name)
 		if name == "" {
 			continue
 		}
 
-		properties[name] = propertySchema(field.Type.Kind(), field.Tag.Get("jsonschema"))
+		schema, err := propertySchema(field.Type, field.Tag.Get("jsonschema"))
+		if err != nil {
+			return nil, oops.
+				In("openai").
+				Code("unsupported_schema_field").
+				Wrapf(err, "schema field %q", name)
+		}
+
+		properties[name] = schema
 		required = append(required, name)
 	}
 
@@ -99,7 +117,7 @@ func schemaForType(typ reflect.Type) map[string]any {
 		schemaKeyProperties:           properties,
 		schemaKeyRequired:             required,
 		schemaKeyAdditionalProperties: false,
-	}
+	}, nil
 }
 
 // jsonFieldName resolves the schema property name from a field's json tag,
@@ -119,16 +137,23 @@ func jsonFieldName(jsonTag, goName string) string {
 	return name
 }
 
-// propertySchema builds the schema fragment for one field from its kind and its
-// jsonschema struct tag, attaching a description when the tag supplies one.
-func propertySchema(kind reflect.Kind, schemaTag string) map[string]any {
-	schema := map[string]any{schemaKeyType: jsonType(kind)}
+// propertySchema builds the schema fragment for one field from its type and its
+// jsonschema struct tag, attaching a description when the tag supplies one. It
+// returns an error when the field's type maps to no supported JSON Schema type,
+// so an unmappable field is rejected rather than coerced.
+func propertySchema(typ reflect.Type, schemaTag string) (map[string]any, error) {
+	typeName, err := jsonType(typ.Kind())
+	if err != nil {
+		return nil, err
+	}
+
+	schema := map[string]any{schemaKeyType: typeName}
 
 	if desc := tagDescription(schemaTag); desc != "" {
 		schema[schemaKeyDescription] = desc
 	}
 
-	return schema
+	return schema, nil
 }
 
 // tagDescription extracts the description= value from a jsonschema struct tag, or
@@ -143,8 +168,17 @@ func tagDescription(schemaTag string) string {
 	return ""
 }
 
-// jsonType maps a Go reflect kind to its JSON Schema type name, defaulting to a
-// string type for kinds the schema does not model.
-func jsonType(kind reflect.Kind) string {
-	return lo.ValueOr(jsonTypeByKind, kind, jsonTypeString)
+// jsonType maps a Go reflect kind to its JSON Schema type name, returning an
+// error for kinds the structured-output schema does not model so the caller
+// never emits a silently coerced type the decoder cannot read back.
+func jsonType(kind reflect.Kind) (string, error) {
+	name, ok := jsonTypeByKind[kind]
+	if !ok {
+		return "", oops.
+			In("openai").
+			Code("unsupported_schema_kind").
+			Errorf("reflect kind %s has no JSON Schema mapping", kind)
+	}
+
+	return name, nil
 }
