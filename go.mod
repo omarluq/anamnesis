@@ -6,6 +6,7 @@ require (
 	charm.land/fang/v2 v2.0.1
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/clipperhouse/displaywidth v0.11.0
+	github.com/coreos/go-systemd/v22 v22.7.0
 	github.com/dustin/go-humanize v1.0.1
 	github.com/gdamore/tcell/v3 v3.4.0
 	github.com/mvm-sh/mvm v0.5.0
@@ -42,6 +43,7 @@ require (
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/gdamore/encoding v1.0.1 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
+	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
