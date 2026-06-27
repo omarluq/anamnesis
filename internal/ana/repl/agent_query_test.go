@@ -173,6 +173,37 @@ func TestRegisterQueryPreservesAgentTerminalPrimitives(t *testing.T) {
 	sub.AssertCalled(t, "Sub", "is ssh healthy?", "[a]")
 }
 
+// TestRegisterAgentPreservesQueryPrimitives registers the query surface first and
+// the agent terminal surface second — the reverse of the production order — and
+// proves both still coexist: agent.Query runs and its reply, assigned across
+// turns, resolves through agent.FINAL_VAR, so re-importing the agent package from
+// RegisterAgent re-emitted Query/QueryBatched rather than dropping them. Paired
+// with TestRegisterQueryPreservesAgentTerminalPrimitives it proves the two
+// registrations are order-independent.
+func TestRegisterAgentPreservesQueryPrimitives(t *testing.T) {
+	t.Parallel()
+
+	interpreter := repl.NewInterpreter()
+
+	sub := new(mockSubLLM)
+	sub.On("Sub", "is ssh healthy?", "[a]").Return("ssh is healthy", nil)
+
+	repl.RegisterQuery(interpreter, sub, fullBudget())
+	repl.RegisterAgent(interpreter, new(mockCitationSink))
+
+	_, err := interpreter.Eval("turn_0", `summary := agent.Query("is ssh healthy?", []string{"a"})`)
+	require.NoError(t, err)
+
+	_, err = interpreter.Eval("turn_1", `agent.FINAL_VAR("summary")`)
+	require.NoError(t, err)
+
+	answer, ok := interpreter.Final()
+	require.True(t, ok, "FINAL_VAR resolves after the agent surface is registered second")
+	assert.Equal(t, "ssh is healthy", answer)
+
+	sub.AssertCalled(t, "Sub", "is ssh healthy?", "[a]")
+}
+
 // TestQueryBatchedRejectsArityMismatch proves agent.QueryBatched aborts the turn
 // before any sub-call when handed more prompts than ctxs: the arity-mismatch error
 // reaches stdout and Eval, no retval crosses back, and the seam is never touched.

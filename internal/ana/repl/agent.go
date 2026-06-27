@@ -2,8 +2,12 @@ package repl
 
 import (
 	"fmt"
+	"go/token"
 	"reflect"
+	"strings"
 	"sync"
+
+	"github.com/mvm-sh/mvm/symbol"
 
 	"github.com/omarluq/anamnesis/internal/ana/journal"
 )
@@ -60,6 +64,11 @@ type Agent struct {
 // name, forwarding citations to sink. It binds the returned Agent to interpreter:
 // Interpreter.Final later resolves the terminal answer the Agent records, reading
 // the named REPL variable for an answer assembled across turns by FINAL_VAR.
+//
+// Because mvm replaces a package's symbol table wholesale on import, RegisterAgent
+// re-emits the Query and QueryBatched primitives a prior RegisterQuery installed
+// alongside the terminal trio, so the agent and query surfaces coexist on the
+// agent package regardless of the order the two are registered in.
 func RegisterAgent(interpreter *Interpreter, sink CitationSink) *Agent {
 	agent := &Agent{
 		sink:    sink,
@@ -74,6 +83,7 @@ func RegisterAgent(interpreter *Interpreter, sink CitationSink) *Agent {
 		"Cite":      reflect.ValueOf(agent.cite),
 	}
 
+	mergeQuerySurface(interpreter, symbols)
 	importSurface(interpreter, "agent", symbols)
 	agentBindings.Store(interpreter, agent)
 
@@ -146,12 +156,17 @@ func (interpreter *Interpreter) Final() (string, bool) {
 	return agent.resolve(interpreter)
 }
 
-// variableString evaluates the REPL variable named name against the session
-// state and renders its current value as a string. It returns false when the
-// variable is unbound, the evaluation faults, or the value cannot be read, so a
-// FINAL_VAR pointed at a missing variable degrades to "no answer" rather than a
-// panic.
+// variableString resolves the REPL variable reference named name against the
+// session state and renders its current value as a string. name must be a bound
+// session variable or a dotted field selector rooted at one; it returns false for
+// anything else — an unbound name, a faulting evaluation, or a value that cannot
+// be read — so a FINAL_VAR pointed at a missing variable degrades to "no answer"
+// rather than a panic.
 func (interpreter *Interpreter) variableString(name string) (string, bool) {
+	if !interpreter.boundVariableRef(name) {
+		return "", false
+	}
+
 	value, err := interpreter.engine.Eval("agent_final_var", name)
 	if err != nil || !value.IsValid() {
 		return "", false
@@ -166,4 +181,25 @@ func (interpreter *Interpreter) variableString(name string) (string, bool) {
 	}
 
 	return "", false
+}
+
+// boundVariableRef reports whether name is a variable reference — a bare session
+// variable or a dotted field selector rooted at one — whose root identifier is
+// actually bound as a global session variable. It gates variableString so
+// FINAL_VAR resolves a real symbol rather than re-evaluating arbitrary source:
+// every dot-separated segment must be a Go identifier, ruling out the calls and
+// operators that would otherwise execute on each Final() call, and the root must
+// name a bound variable, ruling out an unbound name the engine would otherwise
+// resolve shell-style to its own bareword.
+func (interpreter *Interpreter) boundVariableRef(name string) bool {
+	segments := strings.Split(name, ".")
+	for _, segment := range segments {
+		if !token.IsIdentifier(segment) {
+			return false
+		}
+	}
+
+	sym, ok := interpreter.engine.Symbols[segments[0]]
+
+	return ok && sym != nil && sym.Kind == symbol.Var
 }
