@@ -13,8 +13,10 @@ import (
 // connection is dialed lazily on the first read and reused for the Client's life,
 // so constructing a Client opens no bus connection and a Client assembles even
 // where the system bus is unreachable — the dial, and any failure it raises, is
-// deferred to the first call rather than to construction. A Client is safe for
-// concurrent use by multiple goroutines and must not be copied after first use.
+// deferred to the first call rather than to construction. The zero value is
+// usable and dials the real system bus on first read; NewClient is the
+// conventional constructor. A Client is safe for concurrent use by multiple
+// goroutines and must not be copied after first use.
 type Client struct {
 	// conn is the cached systemd D-Bus connection, nil until the first read; the
 	// mutex below guards it so the bus is dialed once.
@@ -112,7 +114,12 @@ func (client *Client) connection(ctx context.Context) (*dbus.Conn, error) {
 		return client.conn, nil
 	}
 
-	conn, err := client.dial(ctx)
+	dial := client.dial
+	if dial == nil {
+		dial = dbus.NewSystemdConnectionContext
+	}
+
+	conn, err := dial(ctx)
 	if err != nil {
 		return nil, oops.In("systemd").Code("dial").Wrapf(err, "dial systemd dbus connection")
 	}
