@@ -2,13 +2,17 @@ package terminal
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/gdamore/tcell/v3"
 
 	"github.com/omarluq/anamnesis/internal/tui"
 )
 
-const tracePlaceholder = "Waiting for activity…"
+const (
+	tracePlaceholder = "Waiting for activity…"
+	traceIndentUnit  = "  "
+)
 
 // tracePane is an append-only, color-coded view of controller trace events.
 type tracePane struct {
@@ -46,14 +50,27 @@ func (pane *tracePane) appendEvent(event TraceEvent) {
 	pane.view.SetLines(pane.lines)
 }
 
-// traceText formats an event into a single display string.
+// traceText formats an event into a single display string, indenting nested
+// sub-call lines so fan-out reads as a tree.
 func traceText(event TraceEvent) string {
+	indent := traceIndent(event.Depth)
 	total := event.TokensIn + event.TokensOut
+
 	if total > 0 {
-		return fmt.Sprintf("[%s] %s (%s tok)", event.Kind, event.Text, tokens(total))
+		return fmt.Sprintf("%s[%s] %s (%s tok)", indent, event.Kind, event.Text, tokens(total))
 	}
 
-	return fmt.Sprintf("[%s] %s", event.Kind, event.Text)
+	return fmt.Sprintf("%s[%s] %s", indent, event.Kind, event.Text)
+}
+
+// traceIndent returns the leading indentation for an event at depth: two spaces
+// per nesting level, and none at the top level.
+func traceIndent(depth int) string {
+	if depth <= 0 {
+		return ""
+	}
+
+	return strings.Repeat(traceIndentUnit, depth)
 }
 
 // traceColor selects the foreground color used to render an event kind.
@@ -65,6 +82,10 @@ func traceColor(theme Theme, kind TraceKind) tcell.Color {
 		return theme.Accent
 	case TraceKindUsage:
 		return theme.Warning
+	case TraceKindCode:
+		return theme.Dim
+	case TraceKindStdout:
+		return theme.Muted
 	case TraceKindTurn:
 		return theme.Text
 	default:

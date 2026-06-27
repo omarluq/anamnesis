@@ -32,19 +32,19 @@ func TestEmitter(t *testing.T) {
 	want := []terminal.TraceEvent{
 		{
 			Kind: terminal.TraceKindTurn, Text: "planning",
-			TokensIn: 0, TokensOut: 0, CostMicros: 0, RunID: runID,
+			TokensIn: 0, TokensOut: 0, CostMicros: 0, Depth: 0, RunID: runID,
 		},
 		{
 			Kind: terminal.TraceKindSubCall, Text: "fan out boot 3",
-			TokensIn: 0, TokensOut: 0, CostMicros: 0, RunID: runID,
+			TokensIn: 0, TokensOut: 0, CostMicros: 0, Depth: 0, RunID: runID,
 		},
 		{
 			Kind: terminal.TraceKindFinal, Text: "root cause: oom-kill",
-			TokensIn: 0, TokensOut: 0, CostMicros: 0, RunID: runID,
+			TokensIn: 0, TokensOut: 0, CostMicros: 0, Depth: 0, RunID: runID,
 		},
 		{
 			Kind: terminal.TraceKindUsage, Text: "",
-			TokensIn: 4000, TokensOut: 2000, CostMicros: 1234, RunID: runID,
+			TokensIn: 4000, TokensOut: 2000, CostMicros: 1234, Depth: 0, RunID: runID,
 		},
 	}
 

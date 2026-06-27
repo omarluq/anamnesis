@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v3"
+	"github.com/samber/mo"
 	"github.com/samber/oops"
 
 	"github.com/omarluq/anamnesis/internal/tui"
@@ -36,6 +37,8 @@ type App struct {
 	chat         *chatPane
 	trace        *tracePane
 	cost         *costPane
+	controller   Controller
+	cancel       context.CancelFunc
 	traceCh      <-chan TraceEvent
 	title        string
 	runID        uint64
@@ -50,6 +53,11 @@ type RunOptions struct {
 	// Trace is an optional channel of controller events. When nil the trace and
 	// cost panes render their placeholders.
 	Trace <-chan TraceEvent
+	// Controller is the optional submit seam the chat composer drives to start an
+	// investigation: submitting a query calls Controller.Start for the new run.
+	// When nil the shell runs with no controller wired and composer submits stay
+	// idle.
+	Controller Controller
 	// Title is the label shown in the chat pane header.
 	Title string
 }
@@ -75,10 +83,7 @@ func Run(ctx context.Context, opts RunOptions) error {
 func newApp(screen tcell.Screen, opts RunOptions) *App {
 	theme := DefaultTheme()
 
-	title := opts.Title
-	if title == "" {
-		title = defaultTitle
-	}
+	title := mo.EmptyableToOption(opts.Title).OrElse(defaultTitle)
 
 	return &App{
 		screen:       screen,
@@ -86,6 +91,8 @@ func newApp(screen tcell.Screen, opts RunOptions) *App {
 		chat:         newChatPane(theme, title),
 		trace:        newTracePane(theme),
 		cost:         newCostPane(theme),
+		controller:   opts.Controller,
+		cancel:       nil,
 		traceCh:      opts.Trace,
 		title:        title,
 		theme:        theme,
@@ -104,6 +111,8 @@ func (app *App) loop(ctx context.Context) error {
 	frame := time.NewTicker(frameInterval)
 	defer frame.Stop()
 
+	defer app.cancelRun()
+
 	app.dirty = true
 
 	for {
@@ -113,7 +122,7 @@ func (app *App) loop(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case event := <-app.screen.EventQ():
-			if event == nil || app.handleEvent(event) {
+			if event == nil || app.handleEvent(ctx, event) {
 				return nil
 			}
 
@@ -196,21 +205,22 @@ func (app *App) layout() *tui.Flex {
 }
 
 // handleEvent dispatches a screen event and reports whether the shell quits.
-func (app *App) handleEvent(event tcell.Event) bool {
+func (app *App) handleEvent(ctx context.Context, event tcell.Event) bool {
 	switch typed := event.(type) {
 	case *tcell.EventResize:
 		app.onResize()
 
 		return false
 	case *tcell.EventKey:
-		return app.handleKey(typed)
+		return app.handleKey(ctx, typed)
 	default:
 		return false
 	}
 }
 
-// handleKey applies the priority chain: quit keys first, else the composer.
-func (app *App) handleKey(event *tcell.EventKey) bool {
+// handleKey applies the priority chain: quit keys first, else the composer, then
+// starts a controller run for any query the composer submitted.
+func (app *App) handleKey(ctx context.Context, event *tcell.EventKey) bool {
 	keyEvent, ok := tui.NewKeyEvent(event)
 	if !ok {
 		return false
@@ -220,7 +230,9 @@ func (app *App) handleKey(event *tcell.EventKey) bool {
 		return true
 	}
 
-	app.chat.handleKey(keyEvent)
+	if query := app.chat.handleKey(keyEvent); query != "" {
+		app.startRun(ctx, query)
+	}
 
 	return false
 }
@@ -237,9 +249,36 @@ func (app *App) isQuitKey(keyEvent tui.KeyEvent) bool {
 	}
 }
 
+// startRun begins a controller investigation for query: it bumps the run ID,
+// marks the shell working, and swaps the active trace channel to the new run's.
+// A submit arriving while a run is in flight is ignored, and a nil controller
+// leaves the shell idle. The per-run context is canceled when the next run
+// starts or the loop exits.
+func (app *App) startRun(ctx context.Context, query string) {
+	if app.working || app.controller == nil {
+		return
+	}
+
+	app.cancelRun()
+
+	runCtx, cancel := context.WithCancel(ctx)
+	app.cancel = cancel
+	app.runID++
+	app.working = true
+	app.traceCh = app.controller.Start(runCtx, query, app.runID)
+}
+
+// cancelRun cancels the active run's context, if any, releasing its controller.
+func (app *App) cancelRun() {
+	if app.cancel != nil {
+		app.cancel()
+	}
+}
+
 // applyTrace routes a trace event to the pane that owns its kind and tracks the
 // working state that drives the header spinner: turns and sub-calls mark the
-// loop busy, a final answer clears it, and usage events leave it unchanged.
+// loop busy, a final answer clears it, code and stdout append mid-turn without
+// changing it, and usage events leave it unchanged.
 func (app *App) applyTrace(event TraceEvent) {
 	switch event.Kind {
 	case TraceKindUsage:
@@ -248,6 +287,9 @@ func (app *App) applyTrace(event TraceEvent) {
 		return
 	case TraceKindTurn, TraceKindSubCall:
 		app.working = true
+	case TraceKindCode, TraceKindStdout:
+		// Code and stdout are emitted mid-turn; the turn already marked the loop
+		// working, so they only append to the trace pane.
 	case TraceKindFinal:
 		app.working = false
 	}

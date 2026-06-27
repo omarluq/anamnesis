@@ -71,11 +71,12 @@ func (pane *chatPane) render(width, height int) []tui.Line {
 	return pane.view.Render(width, height)
 }
 
-// handleKey routes a normalized key event into the composer.
-func (pane *chatPane) handleKey(keyEvent tui.KeyEvent) {
+// handleKey routes a normalized key event into the composer and returns the
+// query submitted on Enter, or an empty string for any other key.
+func (pane *chatPane) handleKey(keyEvent tui.KeyEvent) string {
 	switch keyEvent.Key {
 	case "enter":
-		pane.submit()
+		return pane.submit()
 	case "backspace":
 		pane.composer.DeleteBackward()
 	case "left":
@@ -85,6 +86,8 @@ func (pane *chatPane) handleKey(keyEvent tui.KeyEvent) {
 	default:
 		pane.insert(keyEvent)
 	}
+
+	return ""
 }
 
 // composerEmpty reports whether the composer currently holds no text.
@@ -126,12 +129,16 @@ func (pane *chatPane) insert(keyEvent tui.KeyEvent) {
 	}
 }
 
-// submit echoes the composer text into the answer view and clears the composer.
-func (pane *chatPane) submit() {
+// submit echoes the trimmed composer text into the answer view, clears the
+// composer, and returns the submitted query, or an empty string when the
+// composer held only whitespace.
+func (pane *chatPane) submit() string {
 	text := strings.TrimSpace(pane.composer.Clear())
 	if text == "" {
-		return
+		return ""
 	}
 
 	pane.view.Text += submittedQuestion + text
+
+	return text
 }
