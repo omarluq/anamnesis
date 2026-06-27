@@ -148,13 +148,15 @@ func (app *App) drawIfDirty() {
 	}
 }
 
-// handleTrace applies a trace event, detaching the channel and clearing the
-// working state once it closes, and dropping events whose RunID does not match
-// the active run.
+// handleTrace applies a trace event, detaching the channel, clearing the
+// working state, and marking the frame dirty so the header re-renders without
+// the spinner once the channel closes, and dropping events whose RunID does not
+// match the active run.
 func (app *App) handleTrace(event TraceEvent, ok bool) {
 	if !ok {
 		app.traceCh = nil
 		app.working = false
+		app.dirty = true
 
 		return
 	}
@@ -250,8 +252,10 @@ func (app *App) isQuitKey(keyEvent tui.KeyEvent) bool {
 }
 
 // startRun begins a controller investigation for query: it bumps the run ID,
-// marks the shell working, and swaps the active trace channel to the new run's.
-// A submit arriving while a run is in flight is ignored, and a nil controller
+// marks the shell working, clears the trace pane for the fresh run, and swaps
+// the active trace channel to the new run's. The cost pane is left untouched so
+// its token and dollar totals accumulate across runs as a session total. A
+// submit arriving while a run is in flight is ignored, and a nil controller
 // leaves the shell idle. The per-run context is canceled when the next run
 // starts or the loop exits.
 func (app *App) startRun(ctx context.Context, query string) {
@@ -260,6 +264,7 @@ func (app *App) startRun(ctx context.Context, query string) {
 	}
 
 	app.cancelRun()
+	app.trace.reset()
 
 	runCtx, cancel := context.WithCancel(ctx)
 	app.cancel = cancel
@@ -277,8 +282,9 @@ func (app *App) cancelRun() {
 
 // applyTrace routes a trace event to the pane that owns its kind and tracks the
 // working state that drives the header spinner: turns and sub-calls mark the
-// loop busy, a final answer clears it, code and stdout append mid-turn without
-// changing it, and usage events leave it unchanged.
+// loop busy, a final answer clears it and renders the answer markdown into the
+// chat pane, code and stdout append mid-turn without changing it, and usage
+// events leave it unchanged.
 func (app *App) applyTrace(event TraceEvent) {
 	switch event.Kind {
 	case TraceKindUsage:
@@ -292,6 +298,7 @@ func (app *App) applyTrace(event TraceEvent) {
 		// working, so they only append to the trace pane.
 	case TraceKindFinal:
 		app.working = false
+		app.chat.appendAnswer(event.Text)
 	}
 
 	app.trace.appendEvent(event)

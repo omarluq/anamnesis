@@ -93,6 +93,30 @@ func TestChatPaneSubmitEchoesMessageAndClearsComposer(t *testing.T) {
 	assert.Contains(t, text, "you:", "submitted message is attributed to the user")
 }
 
+func TestChatPaneAppendAnswerRendersAssistantMarkdown(t *testing.T) {
+	t.Parallel()
+
+	app := newChatApp()
+
+	app.chat.appendAnswer("**root cause:** the disk filled up")
+
+	text := strings.Join(chatRender(app, 60, 40), "\n")
+	assert.Contains(t, text, "root cause:", "the final answer markdown renders into the answer view")
+	assert.Contains(t, text, "ana:", "the rendered answer is attributed to the assistant")
+	assert.Contains(t, text, "Type a message", "the welcome body is preserved above the answer")
+}
+
+func TestChatPaneAppendAnswerIgnoresBlankMarkdown(t *testing.T) {
+	t.Parallel()
+
+	app := newChatApp()
+	before := app.chat.view.Text
+
+	app.chat.appendAnswer("   \n\t ")
+
+	assert.Equal(t, before, app.chat.view.Text, "a blank final answer does not append to the answer view")
+}
+
 func TestComposerSubmitDrivesControllerRunThroughLoop(t *testing.T) {
 	t.Parallel()
 

@@ -268,8 +268,8 @@ func composerInputCtrl(app *App, key string) {
 
 // traceLines returns the trace pane's accumulated line texts.
 func traceLines(app *App) []string {
-	texts := make([]string, 0, len(app.trace.lines))
-	for _, line := range app.trace.lines {
+	texts := make([]string, 0, len(app.trace.view.Lines))
+	for _, line := range app.trace.view.Lines {
 		texts = append(texts, line.Text)
 	}
 
@@ -278,7 +278,7 @@ func traceLines(app *App) []string {
 
 // chatRender returns the rendered answer lines as plain text.
 func chatRender(app *App, width, height int) []string {
-	lines := app.chat.render(width, height)
+	lines := app.chat.view.Render(width, height)
 	texts := make([]string, 0, len(lines))
 
 	for _, line := range lines {

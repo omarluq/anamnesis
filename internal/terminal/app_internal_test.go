@@ -103,6 +103,49 @@ func TestStartRunWithoutControllerStaysIdle(t *testing.T) {
 	assert.Nil(t, app.traceCh)
 }
 
+func TestStartRunCancelsRunContextOnLoopExit(t *testing.T) {
+	t.Parallel()
+
+	screen := newFakeScreen(80, 24)
+
+	// An open channel that never closes keeps the run in flight, so the only thing
+	// that can cancel the run's child context is the loop's deferred cancelRun.
+	var stream <-chan TraceEvent = make(chan TraceEvent)
+
+	// The buffered channel hands the run's child context back to the test goroutine
+	// without the closure assigning into a captured context (which fatcontext flags).
+	capturedCtx := make(chan context.Context, 1)
+
+	ctrl := new(mockController)
+	ctrl.On("Start", mock.Anything, "why did it crash", uint64(1)).
+		Run(func(args mock.Arguments) {
+			if runCtx, ok := args.Get(0).(context.Context); ok {
+				capturedCtx <- runCtx
+			}
+		}).
+		Return(stream).
+		Once()
+
+	app := newApp(screen, RunOptions{Trace: nil, Controller: ctrl, Title: defaultTitle})
+
+	done := make(chan error, 1)
+	go func() { done <- app.loop(context.Background()) }()
+
+	submitQuery(screen, "why did it crash")
+	// The quit key is queued behind the submit, so Start has been driven and the
+	// run's child context captured by the time the loop processes the quit. The
+	// parent context here is never canceled, so a still-live captured context after
+	// the loop returns would prove the run goroutine was leaked.
+	screen.inject(tcell.NewEventKey(tcell.KeyCtrlC, "", tcell.ModNone))
+	require.NoError(t, awaitLoop(t, done))
+
+	ctrl.AssertExpectations(t)
+	require.Len(t, capturedCtx, 1, "the controller run received a per-run context")
+	runCtx := <-capturedCtx
+	require.ErrorIs(t, runCtx.Err(), context.Canceled,
+		"the run's child context is canceled when the loop exits on the quit-key path")
+}
+
 func TestLoopQuitsOnCtrlC(t *testing.T) {
 	t.Parallel()
 
@@ -290,6 +333,34 @@ func TestApplyTraceRoutesUsageToCostAndRestToTrace(t *testing.T) {
 	assert.Equal(t, 2, app.cost.tokensIn, "usage events tally input tokens into the cost pane")
 	assert.Equal(t, 5, app.cost.tokensOut, "usage events tally output tokens into the cost pane")
 	assert.Equal(t, int64(250_000), app.cost.costMicros)
+}
+
+func TestApplyTraceFinalRendersAnswerAndClearsSpinner(t *testing.T) {
+	t.Parallel()
+
+	app := newApp(newFakeScreen(80, 24), RunOptions{
+		Trace:      nil,
+		Controller: nil,
+		Title:      defaultTitle,
+	})
+
+	// A turn marks the loop working, so the header carries the spinner glyph.
+	app.applyTrace(traceEvent(TraceKindTurn, "investigating", 0, 0, 0, 0))
+	app.spinnerFrame = 0
+	require.True(t, app.working)
+	require.Equal(t, defaultTitle+" "+string(spinnerFrames[0]), app.headerTitle())
+
+	// The final answer clears the working state and renders into the chat view.
+	app.applyTrace(traceEvent(TraceKindFinal, "**root cause:** disk full", 0, 0, 0, 0))
+
+	assert.False(t, app.working, "a final answer clears the working state")
+	assert.Equal(t, defaultTitle, app.headerTitle(), "the header no longer shows the spinner")
+	assert.Empty(t, app.spinnerGlyph(), "the spinner glyph retires once the run finishes")
+	assert.Contains(t, app.chat.view.Text, "root cause:", "the final answer markdown lands in the chat answer view")
+
+	// The final event still surfaces as the FINAL signal line in the trace pane.
+	assert.Contains(t, traceLines(app), "[final] **root cause:** disk full",
+		"the final event continues to append to the trace pane")
 }
 
 // TestAppRendersThreePanesAndQuits drives the full shell headlessly through a
