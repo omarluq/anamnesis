@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -245,10 +246,27 @@ func scriptControllerTurns(
 func assertTraceSequence(t *testing.T, events <-chan terminal.TraceEvent, turn0, subCall, turn1, final string) {
 	t.Helper()
 
-	assertTraceEvent(t, <-events, terminal.TraceKindTurn, turn0)
-	assertTraceEvent(t, <-events, terminal.TraceKindSubCall, subCall)
-	assertTraceEvent(t, <-events, terminal.TraceKindTurn, turn1)
-	assertTraceEvent(t, <-events, terminal.TraceKindFinal, final)
+	assertTraceEvent(t, receiveTraceEvent(t, events), terminal.TraceKindTurn, turn0)
+	assertTraceEvent(t, receiveTraceEvent(t, events), terminal.TraceKindSubCall, subCall)
+	assertTraceEvent(t, receiveTraceEvent(t, events), terminal.TraceKindTurn, turn1)
+	assertTraceEvent(t, receiveTraceEvent(t, events), terminal.TraceKindFinal, final)
+}
+
+// receiveTraceEvent reads the next trace event off events, failing the test fast
+// instead of blocking until the package deadline when a regression drops an event.
+func receiveTraceEvent(t *testing.T, events <-chan terminal.TraceEvent) terminal.TraceEvent {
+	t.Helper()
+
+	select {
+	case event := <-events:
+		return event
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for trace event")
+	}
+
+	var zero terminal.TraceEvent
+
+	return zero
 }
 
 // assertTraceEvent asserts one drained event carries the expected kind and text and

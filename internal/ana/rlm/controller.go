@@ -112,14 +112,23 @@ func (controller *Controller) Run(ctx context.Context) (string, error) {
 // is already spent — renders the answer, while a first critique is recorded for the
 // controller and the loop runs once more so the controller can revise against it,
 // seeing that critique surfaced in its framed history. The shared session budget
-// caps the revision, so the gate settles after at most one extra pass. It returns an
-// error when the loop fails, a cited cursor was never made visible, or the judge
-// call fails.
+// caps the revision, so the gate settles after at most one extra pass. When the §6
+// wall-time backstop has already canceled the context, Run returns its force-finish
+// answer and the gate is skipped: auditing on the dead context would only fail the
+// judge call with a deadline error, so a timeout renders the partial answer rather
+// than turning into an error. It returns an error when the loop fails, a cited cursor
+// was never made visible, or the judge call fails.
 func (controller *Controller) RunAudited(ctx context.Context) (string, error) {
 	for {
 		answer, err := controller.Run(ctx)
 		if err != nil {
 			return "", err
+		}
+
+		select {
+		case <-ctx.Done():
+			return answer, nil
+		default:
 		}
 
 		settled, err := controller.reviewed(ctx, answer)

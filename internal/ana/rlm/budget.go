@@ -65,6 +65,32 @@ func (budget *Budget) ReserveSubCall() error {
 	return reserve(&budget.subCalls, budget.MaxSubCalls, errSubCallsExceeded)
 }
 
+// ReserveSubCalls reserves count sub-calls in one atomic admission step, returning
+// errSubCallsExceeded — and reserving nothing — when the remaining budget cannot
+// cover the whole batch. Admitting the batch as a unit lets the parallel fan-out
+// accept or reject every pair together, so a batch larger than the remaining budget
+// produces no partial sub-calls. The compare-and-swap loop never exposes a transient
+// overshoot, so a concurrent batch that does fit is never spuriously rejected. A
+// non-positive count reserves nothing and succeeds.
+func (budget *Budget) ReserveSubCalls(count int) error {
+	if count <= 0 {
+		return nil
+	}
+
+	for {
+		current := budget.subCalls.Load()
+		next := current + int64(count)
+
+		if next > int64(budget.MaxSubCalls) {
+			return errSubCallsExceeded
+		}
+
+		if budget.subCalls.CompareAndSwap(current, next) {
+			return nil
+		}
+	}
+}
+
 // EnterDepth claims one recursion level, returning errDepthExceeded when the
 // MaxDepth gauge is already saturated. A rejected claim leaves the gauge
 // unchanged so concurrent callers never overshoot the limit. Pair every
