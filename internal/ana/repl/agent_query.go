@@ -41,13 +41,6 @@ type QueryBudget struct {
 	MaxSubCalls int
 }
 
-// queryBindings associates each interpreter with the queryRunner registered on
-// it, so RegisterAgent can re-emit Query and QueryBatched when it re-imports the
-// agent package after the query surface, keeping the two registrations
-// order-independent. An Interpreter is session-scoped, so at most one runner is
-// ever bound per key.
-var queryBindings sync.Map
-
 // RegisterQuery exposes the bounded sub-call primitives agent.Query and
 // agent.QueryBatched to interpreter, so controller source can fan a question out
 // to sub against the depth and sub-call ceilings in budget. Because mvm replaces a
@@ -72,7 +65,7 @@ func RegisterQuery(interpreter *Interpreter, sub SubLLM, budget QueryBudget) {
 
 	mergeAgentSurface(interpreter, symbols)
 	importSurface(interpreter, "agent", symbols)
-	queryBindings.Store(interpreter, runner)
+	interpreter.queryRunner = runner
 }
 
 // mergeAgentSurface adds the terminal primitives of the Agent already bound to
@@ -106,17 +99,10 @@ func mergeQuerySurface(interpreter *Interpreter, symbols map[string]reflect.Valu
 }
 
 // loadQueryRunner returns the queryRunner bound to interpreter and true, or nil
-// and false when none is bound. It centralizes the queryBindings lookup and type
-// assertion mergeQuerySurface relies on, mirroring loadAgent for the query side.
+// and false when none is bound. It centralizes the interpreter-owned binding read
+// mergeQuerySurface relies on, mirroring loadAgent for the query side.
 func loadQueryRunner(interpreter *Interpreter) (*queryRunner, bool) {
-	bound, found := queryBindings.Load(interpreter)
-	if !found {
-		return nil, false
-	}
-
-	runner, ok := bound.(*queryRunner)
-
-	return runner, ok
+	return interpreter.queryRunner, interpreter.queryRunner != nil
 }
 
 // renderEvidence renders the ctx value agent.Query was handed into the evidence

@@ -21,12 +21,27 @@ import (
 // captures its output into per-turn buffers. The zero value is not usable;
 // construct one with NewInterpreter.
 //
+// The interpreter owns the agent and query primitive bindings RegisterAgent and
+// RegisterQuery install, rather than a package-global map keyed by *Interpreter:
+// the per-session state lives and dies with the interpreter, so a finished
+// session is reclaimed by the garbage collector with no binding entry to leak and
+// no teardown to remember.
+//
 // An Interpreter is not safe for concurrent use: Eval mutates the shared engine
 // and resets the per-turn output buffers, so a single caller must serialize its
 // Eval calls, as the RLM controller does by evaluating one turn at a time.
 type Interpreter struct {
+	// engine is the mvm interpreter holding the persistent session state.
 	engine *interp.Interp
+	// agent is the §7 terminal primitive façade RegisterAgent bound, or nil when
+	// none has been registered on this interpreter yet.
+	agent *Agent
+	// queryRunner backs the §6 bounded sub-call primitives RegisterQuery bound, or
+	// nil when none has been registered on this interpreter yet.
+	queryRunner *queryRunner
+	// stdout captures what the current turn's source printed to standard output.
 	stdout bytes.Buffer
+	// stderr captures what the current turn's source printed to standard error.
 	stderr bytes.Buffer
 }
 
@@ -41,9 +56,11 @@ func NewInterpreter() *Interpreter {
 	engine.AutoImportPackages()
 
 	interpreter := &Interpreter{
-		engine: engine,
-		stdout: bytes.Buffer{},
-		stderr: bytes.Buffer{},
+		engine:      engine,
+		agent:       nil,
+		queryRunner: nil,
+		stdout:      bytes.Buffer{},
+		stderr:      bytes.Buffer{},
 	}
 	engine.SetIO(os.Stdin, &interpreter.stdout, &interpreter.stderr)
 
