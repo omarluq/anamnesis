@@ -73,8 +73,8 @@ type ControllerResponse struct {
 // JSON-visible field required and sets additionalProperties to false, the strict
 // subset the Responses API enforces. It returns an error when a field's type maps
 // to no supported JSON Schema type, so the contract never silently coerces an
-// unmappable field into a string the decoder cannot read back. T must be a struct
-// type.
+// unmappable field into a string the decoder cannot read back. It also returns
+// an error if T is not a struct type rather than panicking.
 func GenerateSchema[T any]() (map[string]any, error) {
 	return schemaForType(reflect.TypeFor[T]())
 }
@@ -83,8 +83,16 @@ func GenerateSchema[T any]() (map[string]any, error) {
 // exported JSON-visible field, with every property required and
 // additionalProperties off. Unexported fields are skipped because encoding/json
 // never marshals them, and embedded unexported fields fall out the same way. It
-// returns an error when a field's type has no supported JSON Schema mapping.
+// returns an error when typ is not a struct, or when a field's type has no
+// supported JSON Schema mapping.
 func schemaForType(typ reflect.Type) (map[string]any, error) {
+	if typ.Kind() != reflect.Struct {
+		return nil, oops.
+			In("openai").
+			Code("non_struct_schema_type").
+			Errorf("schema type %s is not a struct", typ)
+	}
+
 	fieldCount := typ.NumField()
 	properties := make(map[string]any, fieldCount)
 	required := make([]string, 0, fieldCount)

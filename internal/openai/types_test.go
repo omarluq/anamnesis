@@ -112,6 +112,20 @@ func TestGenerateSchemaRejectsUnsupportedKind(t *testing.T) {
 	assert.ErrorContains(t, err, "tags", "the error names the offending field")
 }
 
+func TestGenerateSchemaRejectsNonStructType(t *testing.T) {
+	t.Parallel()
+
+	schema, err := openai.GenerateSchema[int]()
+
+	require.Error(t, err, "a non-struct type must be rejected, not panic")
+	assert.Nil(t, schema, "no schema is returned for a non-struct type")
+
+	oopsErr, ok := oops.AsOops(err)
+	require.True(t, ok, "error is oops-wrapped")
+	assert.Equal(t, "openai", oopsErr.Domain())
+	assert.ErrorContains(t, err, "not a struct", "the error explains the non-struct cause")
+}
+
 // propertyType returns the JSON Schema "type" of the named property, failing the
 // test when the property or its type is missing or malformed.
 func propertyType(t *testing.T, properties map[string]any, name string) string {
