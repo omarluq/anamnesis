@@ -71,9 +71,10 @@ type QueryFilter struct {
 	Since time.Time
 	// Until is the inclusive realtime upper bound for matched entries.
 	Until time.Time
-	// MaxPriority keeps only entries with PRIORITY <= this value (0..7).
-	// A nil pointer means no priority constraint, which keeps 0 (emerg)
-	// distinct from "unspecified" and preserves the zero-value contract.
+	// MaxPriority keeps only entries with PRIORITY <= this value (0..7). A nil
+	// pointer means no priority constraint, which keeps 0 (emerg) distinct from
+	// "unspecified" and preserves the zero-value contract. Build it with the
+	// new(expr) builtin, e.g. new(4) for a *int pointing at 4.
 	MaxPriority *int
 	// Unit restricts matches to a single _SYSTEMD_UNIT.
 	Unit string

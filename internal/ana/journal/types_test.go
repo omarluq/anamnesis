@@ -61,14 +61,13 @@ func TestQueryFilterFields(t *testing.T) {
 
 	since := time.Date(2026, time.June, 26, 8, 0, 0, 0, time.UTC)
 	until := time.Date(2026, time.June, 26, 10, 0, 0, 0, time.UTC)
-	maxPriority := 4
 	filter := journal.QueryFilter{
 		Since:       since,
 		Until:       until,
 		Unit:        "ssh.service",
 		BootID:      "boot-2",
 		Grep:        "Failed password",
-		MaxPriority: &maxPriority,
+		MaxPriority: new(4),
 		Limit:       1000,
 	}
 
@@ -88,6 +87,15 @@ func TestQueryFilterZeroValueHasNoPriorityConstraint(t *testing.T) {
 	var filter journal.QueryFilter
 
 	assert.Nil(t, filter.MaxPriority, "zero-value MaxPriority must be nil to mean no priority constraint")
+}
+
+func TestQueryFilterMaxPriorityEmergIsNonNil(t *testing.T) {
+	t.Parallel()
+
+	emerg := new(0)
+
+	require.NotNil(t, emerg, "an explicit PRIORITY 0 (emerg) ceiling must be a non-nil *int")
+	assert.Equal(t, 0, *emerg, "the emerg ceiling dereferences to 0, distinct from a nil unset field")
 }
 
 func TestFieldConstants(t *testing.T) {
