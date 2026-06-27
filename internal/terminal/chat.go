@@ -11,7 +11,7 @@ const (
 	composerBorders   = 2
 	welcomeText       = "Type a message and press Enter to begin.\n"
 	submittedQuestion = "\n\n**you:** "
-	assistantAnswer   = "\n\n**ana:** "
+	assistantAnswer   = "\n\n**ana:**\n\n"
 )
 
 // chatPane renders rendered markdown answers above an editable composer.
