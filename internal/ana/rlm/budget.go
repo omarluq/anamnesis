@@ -55,22 +55,14 @@ func NewBudget() *Budget {
 // ReserveTurn consumes one controller turn, returning errTurnsExceeded once the
 // MaxTurns budget is spent. The consumed count is monotonic across a session.
 func (budget *Budget) ReserveTurn() error {
-	if budget.turns.Add(1) > int64(budget.MaxTurns) {
-		return errTurnsExceeded
-	}
-
-	return nil
+	return reserve(&budget.turns, budget.MaxTurns, errTurnsExceeded)
 }
 
 // ReserveSubCall consumes one sub-call, returning errSubCallsExceeded once the
 // MaxSubCalls budget is spent. The accepted count never exceeds MaxSubCalls even
 // under concurrent callers.
 func (budget *Budget) ReserveSubCall() error {
-	if budget.subCalls.Add(1) > int64(budget.MaxSubCalls) {
-		return errSubCallsExceeded
-	}
-
-	return nil
+	return reserve(&budget.subCalls, budget.MaxSubCalls, errSubCallsExceeded)
 }
 
 // EnterDepth claims one recursion level, returning errDepthExceeded when the
@@ -90,4 +82,15 @@ func (budget *Budget) EnterDepth() error {
 // ExitDepth releases one recursion level previously claimed by EnterDepth.
 func (budget *Budget) ExitDepth() {
 	budget.depth.Add(-1)
+}
+
+// reserve consumes one unit from counter, returning sentinel once the limit is
+// spent. The increment is atomic, so the accepted count never overshoots limit
+// even under concurrent callers.
+func reserve(counter *atomic.Int64, limit int, sentinel error) error {
+	if counter.Add(1) > int64(limit) {
+		return sentinel
+	}
+
+	return nil
 }

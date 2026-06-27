@@ -1,12 +1,10 @@
-package main_test
+package main
 
 import (
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-
-	evalmain "github.com/omarluq/anamnesis/evals"
 )
 
 func repeatWords(count int) string {
@@ -72,7 +70,7 @@ func TestTier2Keywords(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := evalmain.Tier2(testCase.answer, testCase.expected, testCase.forbidden)
+			got := Tier2(testCase.answer, testCase.expected, testCase.forbidden)
 			assert.Equal(t, testCase.wantPass, got.Pass)
 			assert.Equal(t, testCase.wantMissing, got.MissingKeywords)
 			assert.Equal(t, testCase.wantPresent, got.ForbiddenPresent)
@@ -83,23 +81,23 @@ func TestTier2Keywords(t *testing.T) {
 func TestTier2LengthBoundary(t *testing.T) {
 	t.Parallel()
 
-	atLimit := evalmain.Tier2(repeatWords(evalmain.MaxAnswerWords), nil, nil)
-	assert.Equal(t, evalmain.MaxAnswerWords, atLimit.WordCount)
+	atLimit := Tier2(repeatWords(MaxAnswerWords), nil, nil)
+	assert.Equal(t, MaxAnswerWords, atLimit.WordCount)
 	assert.True(t, atLimit.Pass)
 
-	overLimit := evalmain.Tier2(repeatWords(evalmain.MaxAnswerWords+1), nil, nil)
-	assert.Equal(t, evalmain.MaxAnswerWords+1, overLimit.WordCount)
+	overLimit := Tier2(repeatWords(MaxAnswerWords+1), nil, nil)
+	assert.Equal(t, MaxAnswerWords+1, overLimit.WordCount)
 	assert.False(t, overLimit.Pass)
 }
 
 func TestTier2LengthGateIsIndependentOfKeywords(t *testing.T) {
 	t.Parallel()
 
-	answer := repeatWords(evalmain.MaxAnswerWords+1) + " OOM"
-	got := evalmain.Tier2(answer, []string{"OOM"}, nil)
+	answer := repeatWords(MaxAnswerWords+1) + " OOM"
+	got := Tier2(answer, []string{"OOM"}, nil)
 
 	assert.Empty(t, got.MissingKeywords)
 	assert.Empty(t, got.ForbiddenPresent)
-	assert.Equal(t, evalmain.MaxAnswerWords+2, got.WordCount)
+	assert.Equal(t, MaxAnswerWords+2, got.WordCount)
 	assert.False(t, got.Pass)
 }

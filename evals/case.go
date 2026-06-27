@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/samber/oops"
 )
@@ -64,13 +63,13 @@ func LoadCases(path string) ([]GoldenCase, error) {
 	scanner.Buffer(make([]byte, 0, bufio.MaxScanTokenSize), maxGoldenLineBytes)
 
 	for lineNum := 1; scanner.Scan(); lineNum++ {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
 			continue
 		}
 
 		var golden GoldenCase
-		if decodeErr := json.Unmarshal([]byte(line), &golden); decodeErr != nil {
+		if decodeErr := json.Unmarshal(line, &golden); decodeErr != nil {
 			return nil, oops.
 				In("evals").
 				Code("malformed_case").
