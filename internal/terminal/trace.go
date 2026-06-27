@@ -14,10 +14,10 @@ const (
 	traceIndentUnit  = "  "
 )
 
-// tracePane is an append-only, color-coded view of controller trace events.
+// tracePane is an append-only, color-coded view of controller trace events. The
+// view's Lines slice is the single source of truth for the accumulated events.
 type tracePane struct {
 	view  *tui.TextView
-	lines []tui.Line
 	theme Theme
 }
 
@@ -26,7 +26,7 @@ func newTracePane(theme Theme) *tracePane {
 	view := tui.NewTextView(tracePlaceholder)
 	view.Style = theme.fg(theme.Muted)
 
-	return &tracePane{view: view, lines: nil, theme: theme}
+	return &tracePane{view: view, theme: theme}
 }
 
 // Draw paints the trace box and its lines into rect.
@@ -43,11 +43,22 @@ func (pane *tracePane) Draw(screen tui.ContentSetter, rect tui.Rect) {
 	pane.view.Draw(screen, inner)
 }
 
-// appendEvent styles event and appends it as a new trailing line.
+// appendEvent styles event and appends it as a new trailing line directly onto
+// the view's Lines slice, clearing the placeholder Text so the events render.
 func (pane *tracePane) appendEvent(event TraceEvent) {
 	line := tui.NewLine(pane.theme.fg(traceColor(pane.theme, event.Kind)), traceText(event))
-	pane.lines = append(pane.lines, line)
-	pane.view.SetLines(pane.lines)
+	pane.view.Lines = append(pane.view.Lines, line)
+	pane.view.Text = ""
+}
+
+// reset clears the accumulated trace lines and re-asserts the muted placeholder
+// state newTracePane establishes, so each new run begins with an empty pane. The
+// session cost pane is intentionally left untouched, so its token and dollar
+// totals accumulate across runs.
+func (pane *tracePane) reset() {
+	pane.view.Lines = nil
+	pane.view.Text = tracePlaceholder
+	pane.view.Style = pane.theme.fg(pane.theme.Muted)
 }
 
 // traceText formats an event into a single display string, indenting nested

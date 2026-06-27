@@ -6,6 +6,7 @@ import (
 
 	"github.com/gdamore/tcell/v3"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -103,6 +104,51 @@ func TestCostRowsFormatLargeTokenCountsWithSeparators(t *testing.T) {
 	assert.Equal(t, []string{labelTokensIn, "1,234,000"}, rows[0])
 	assert.Equal(t, []string{labelTokensOut, "567"}, rows[1])
 	assert.Equal(t, []string{labelTotal, "1,234,567"}, rows[2])
+}
+
+func TestStartRunKeepsCostPaneAsSessionTotal(t *testing.T) {
+	t.Parallel()
+
+	ctrl := new(mockController)
+	ctrl.On("Start", mock.Anything, "first", uint64(1)).Return(scriptedTrace(1)).Once()
+	ctrl.On("Start", mock.Anything, "second", uint64(2)).Return(scriptedTrace(2)).Once()
+
+	app := newApp(newFakeScreen(80, 24), RunOptions{
+		Trace:      nil,
+		Controller: ctrl,
+		Title:      defaultTitle,
+	})
+
+	// Run #1 spends tokens across two usage events, then finishes so a second run
+	// may start.
+	app.startRun(context.Background(), "first")
+	app.applyTrace(traceEvent(TraceKindUsage, "spend", 100, 50, 1_000_000, 1))
+	app.applyTrace(traceEvent(TraceKindUsage, "spend", 20, 5, 500_000, 1))
+	app.applyTrace(traceEvent(TraceKindFinal, "done", 0, 0, 0, 1))
+
+	require.Equal(t, 120, app.cost.tokensIn)
+	require.Equal(t, 55, app.cost.tokensOut)
+	require.Equal(t, "$1.5000", app.cost.dollars())
+	require.False(t, app.working, "the final answer cleared the working state so a new run may begin")
+
+	// Starting run #2 must not reset the cost pane: it remains a running session
+	// total even though the trace pane is cleared.
+	app.startRun(context.Background(), "second")
+	require.Equal(t, uint64(2), app.runID)
+
+	assert.Equal(t, 120, app.cost.tokensIn, "session tokens in carry into run #2")
+	assert.Equal(t, 55, app.cost.tokensOut, "session tokens out carry into run #2")
+	assert.Equal(t, "$1.5000", app.cost.dollars(), "session cost dollars carry into run #2")
+
+	// Run #2 usage accumulates onto the session total rather than starting from
+	// zero.
+	app.applyTrace(traceEvent(TraceKindUsage, "spend", 10, 5, 250_000, 2))
+
+	assert.Equal(t, 130, app.cost.tokensIn, "run #2 usage accumulates onto the session total")
+	assert.Equal(t, 60, app.cost.tokensOut)
+	assert.Equal(t, "$1.7500", app.cost.dollars())
+
+	ctrl.AssertExpectations(t)
 }
 
 func TestCostPaneDrawRendersMetricTable(t *testing.T) {

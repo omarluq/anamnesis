@@ -11,6 +11,7 @@ const (
 	composerBorders   = 2
 	welcomeText       = "Type a message and press Enter to begin.\n"
 	submittedQuestion = "\n\n**you:** "
+	assistantAnswer   = "\n\n**ana:** "
 )
 
 // chatPane renders rendered markdown answers above an editable composer.
@@ -64,11 +65,6 @@ func (pane *chatPane) Draw(screen tui.ContentSetter, rect tui.Rect) {
 
 	pane.view.Draw(screen, answerRect)
 	pane.drawComposer(screen, composerRect)
-}
-
-// render returns the rendered answer lines.
-func (pane *chatPane) render(width, height int) []tui.Line {
-	return pane.view.Render(width, height)
 }
 
 // handleKey routes a normalized key event into the composer and returns the
@@ -133,12 +129,26 @@ func (pane *chatPane) insert(keyEvent tui.KeyEvent) {
 // composer, and returns the submitted query, or an empty string when the
 // composer held only whitespace.
 func (pane *chatPane) submit() string {
-	text := strings.TrimSpace(pane.composer.Clear())
+	return pane.appendTurn(submittedQuestion, pane.composer.Clear())
+}
+
+// appendAnswer renders a controller's FINAL answer markdown into the answer
+// view above the composer, attributed to the assistant. A blank answer is a
+// no-op, so an empty FINAL signal leaves the conversation untouched.
+func (pane *chatPane) appendAnswer(markdown string) {
+	pane.appendTurn(assistantAnswer, markdown)
+}
+
+// appendTurn trims body and, when non-empty, appends it to the answer view
+// under prefix, returning the trimmed text so callers can act on the appended
+// turn. A blank body is a no-op that returns the empty string.
+func (pane *chatPane) appendTurn(prefix, body string) string {
+	text := strings.TrimSpace(body)
 	if text == "" {
 		return ""
 	}
 
-	pane.view.Text += submittedQuestion + text
+	pane.view.Text += prefix + text
 
 	return text
 }
