@@ -40,6 +40,7 @@ func (emitter *Emitter) Usage(tokensIn, tokensOut int, costMicros int64) {
 		TokensOut:  tokensOut,
 		CostMicros: costMicros,
 		RunID:      emitter.runID,
+		Depth:      0,
 	}
 }
 
@@ -52,5 +53,6 @@ func (emitter *Emitter) emit(kind terminal.TraceKind, text string) {
 		TokensOut:  0,
 		CostMicros: 0,
 		RunID:      emitter.runID,
+		Depth:      0,
 	}
 }

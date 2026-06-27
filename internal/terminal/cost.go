@@ -10,6 +10,14 @@ import (
 
 const costMicrosPerDollar = 1_000_000.0
 
+// Row labels shown in the first column of the cost table.
+const (
+	labelTokensIn  = "Tokens In"
+	labelTokensOut = "Tokens Out"
+	labelTotal     = "Total"
+	labelCost      = "Cost"
+)
+
 // costPane tallies token usage and cost and renders them as a two-column table.
 type costPane struct {
 	theme      Theme
@@ -53,10 +61,10 @@ func (pane *costPane) rows() [][]tui.TableCell {
 	style := pane.theme.fg(pane.theme.Text)
 
 	return [][]tui.TableCell{
-		{{Style: style, Text: "Tokens In"}, {Style: style, Text: tokens(pane.tokensIn)}},
-		{{Style: style, Text: "Tokens Out"}, {Style: style, Text: tokens(pane.tokensOut)}},
-		{{Style: style, Text: "Total"}, {Style: style, Text: tokens(pane.tokensIn + pane.tokensOut)}},
-		{{Style: style, Text: "Cost"}, {Style: style, Text: pane.dollars()}},
+		{{Style: style, Text: labelTokensIn}, {Style: style, Text: tokens(pane.tokensIn)}},
+		{{Style: style, Text: labelTokensOut}, {Style: style, Text: tokens(pane.tokensOut)}},
+		{{Style: style, Text: labelTotal}, {Style: style, Text: tokens(pane.tokensIn + pane.tokensOut)}},
+		{{Style: style, Text: labelCost}, {Style: style, Text: pane.dollars()}},
 	}
 }
 

@@ -20,5 +20,5 @@ func newChatCmd() *cobra.Command {
 // runChat launches the interactive terminal chat shell; it backs both the bare
 // `ana` invocation and the explicit `ana chat` subcommand.
 func runChat(cmd *cobra.Command) error {
-	return terminal.Run(cmd.Context(), terminal.RunOptions{Trace: nil, Title: ""})
+	return terminal.Run(cmd.Context(), terminal.RunOptions{Trace: nil, Controller: nil, Title: ""})
 }

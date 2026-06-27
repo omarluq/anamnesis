@@ -1,14 +1,16 @@
-package terminal_test
+package terminal
 
 import (
+	"context"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/gdamore/tcell/v3"
+	"github.com/stretchr/testify/mock"
 
-	"github.com/omarluq/anamnesis/internal/terminal"
+	"github.com/omarluq/anamnesis/internal/tui"
 )
 
 // loopTimeout bounds how long a test waits for the run loop to return before
@@ -17,9 +19,16 @@ const loopTimeout = 2 * time.Second
 
 // fakeScreen is a minimal tcell.Screen used to drive the run loop without a real
 // terminal. It embeds tcell.Screen so it satisfies the interface, but only the
-// handful of methods the loop actually calls (EventQ, Size, Show, Sync and
-// SetContent) are implemented. Any other method would panic on the nil embedded
-// interface, which keeps the test honest about what the loop touches.
+// handful of methods the loop actually calls (EventQ, Size, Show, Sync,
+// SetContent, ShowCursor and HideCursor) are implemented. Any other method would
+// panic on the nil embedded interface, which keeps the test honest about what
+// the loop touches.
+//
+// This stays an embed-the-interface fake rather than a testify mock on purpose:
+// tcell.Screen carries ~30 methods, so a full mock would be far noisier than the
+// embed, and fakeScreen is not a stub but a stateful recorder — it captures the
+// rendered cell buffer plus the Show/Sync/cursor counts that assertions read
+// back, which a testify mock cannot model cleanly.
 type fakeScreen struct {
 	tcell.Screen
 
@@ -159,27 +168,124 @@ func (screen *fakeScreen) contents() string {
 	return builder.String()
 }
 
+// mockController is a testify mock of the Controller seam. Both the live RLM
+// adapter (internal/ana/rlm) and this mock satisfy the interface, so the shell
+// can drive either a real investigation or a scripted demo through the same seam
+// without knowing which it holds. Expectations script the trace channel Start
+// replays, and AssertExpectations / AssertCalled confirm the shell drove Start
+// with the (query, runID) the test scripted.
+//
+// Controller is a single-method seam, so a testify mock is a clear win over a
+// hand-written stub: .On("Start", ...).Return(channel) scripts the run and the
+// built-in call recorder asserts the submit lifecycle with no bespoke
+// bookkeeping. The embedded mock.Mock is mutex-guarded, so the -race detector
+// stays quiet while the run loop calls Start from its own goroutine.
+type mockController struct {
+	mock.Mock
+}
+
+// Start records the (query, runID) it was driven with and replays the scripted
+// channel configured via .On("Start", ...).Return(channel), so tests can both
+// assert the shell's submit lifecycle and feed scripted trace events back
+// through the loop.
+func (m *mockController) Start(ctx context.Context, query string, runID uint64) <-chan TraceEvent {
+	args := m.Called(ctx, query, runID)
+
+	channel, ok := args.Get(0).(<-chan TraceEvent)
+	if !ok {
+		return nil
+	}
+
+	return channel
+}
+
+// compile-time assertion that mockController satisfies the Controller seam.
+var _ Controller = (*mockController)(nil)
+
 // runeKey constructs a tcell printable-rune key event.
 func runeKey(text string) *tcell.EventKey {
 	return tcell.NewEventKey(tcell.KeyRune, text, tcell.ModNone)
 }
 
-// traceEvent builds a fully-populated TraceEvent, keeping table rows readable.
+// traceEvent builds a fully-populated top-level TraceEvent, keeping table rows
+// readable.
 func traceEvent(
-	kind terminal.TraceKind,
+	kind TraceKind,
 	text string,
 	tokensIn, tokensOut int,
 	micros int64,
 	runID uint64,
-) terminal.TraceEvent {
-	return terminal.TraceEvent{
+) TraceEvent {
+	return TraceEvent{
 		Kind:       kind,
 		Text:       text,
 		TokensIn:   tokensIn,
 		TokensOut:  tokensOut,
 		CostMicros: micros,
+		Depth:      0,
 		RunID:      runID,
 	}
+}
+
+// traceDepthEvent builds a token-free TraceEvent at sub-call nesting depth so
+// indentation assertions bind the rendered prefix to the event's Depth.
+func traceDepthEvent(kind TraceKind, text string, depth int) TraceEvent {
+	return TraceEvent{
+		Kind:       kind,
+		Text:       text,
+		TokensIn:   0,
+		TokensOut:  0,
+		CostMicros: 0,
+		Depth:      depth,
+		RunID:      0,
+	}
+}
+
+// scriptedTrace returns a closed, buffered channel replaying events stamped with
+// runID, standing in for a controller run's trace stream in mockController setup.
+func scriptedTrace(runID uint64, events ...TraceEvent) <-chan TraceEvent {
+	out := make(chan TraceEvent, len(events))
+	for _, event := range events {
+		event.RunID = runID
+		out <- event
+	}
+
+	close(out)
+
+	return out
+}
+
+// composerInput feeds a printable key into the chat composer, mirroring the
+// normalized key events the run loop routes in from the screen.
+func composerInput(app *App, key, text string) {
+	app.chat.handleKey(tui.KeyEvent{Key: key, Text: text, Ctrl: false, Alt: false, Shift: false})
+}
+
+// composerInputCtrl feeds a ctrl-chorded key into the chat composer.
+func composerInputCtrl(app *App, key string) {
+	app.chat.handleKey(tui.KeyEvent{Key: key, Text: "", Ctrl: true, Alt: false, Shift: false})
+}
+
+// traceLines returns the trace pane's accumulated line texts.
+func traceLines(app *App) []string {
+	texts := make([]string, 0, len(app.trace.lines))
+	for _, line := range app.trace.lines {
+		texts = append(texts, line.Text)
+	}
+
+	return texts
+}
+
+// chatRender returns the rendered answer lines as plain text.
+func chatRender(app *App, width, height int) []string {
+	lines := app.chat.render(width, height)
+	texts := make([]string, 0, len(lines))
+
+	for _, line := range lines {
+		texts = append(texts, line.Text)
+	}
+
+	return texts
 }
 
 // screenRow returns the single rendered row of text that contains label,
@@ -216,9 +322,27 @@ func awaitRender(t *testing.T, screen *fakeScreen, want int) {
 	}
 }
 
+// awaitContents waits until the rendered screen contains want, so a test can
+// synchronize on a drained-and-drawn trace line before driving further input.
+// It reads the mutex-guarded cell buffer, so polling races with the loop are
+// safe under the race detector.
+func awaitContents(t *testing.T, screen *fakeScreen, want string) {
+	t.Helper()
+
+	deadline := time.After(loopTimeout)
+
+	for !strings.Contains(screen.contents(), want) {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for %q to render", want)
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+
 // sendTrace posts a trace event with a bounded wait so a wedged loop fails the
 // test instead of blocking forever on the unbuffered channel.
-func sendTrace(t *testing.T, channel chan<- terminal.TraceEvent, event terminal.TraceEvent) {
+func sendTrace(t *testing.T, channel chan<- TraceEvent, event TraceEvent) {
 	t.Helper()
 
 	select {
