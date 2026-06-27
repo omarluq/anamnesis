@@ -92,10 +92,16 @@ func TestQueryFilterZeroValueHasNoPriorityConstraint(t *testing.T) {
 func TestQueryFilterMaxPriorityEmergIsNonNil(t *testing.T) {
 	t.Parallel()
 
-	emerg := new(0)
+	// PRIORITY 0 (emerg) equals int's zero value, so the only way to express an
+	// explicit emerg ceiling is a non-nil *int pointing at 0. Round-trip it
+	// through the real field to prove it stays distinct from the nil/unset case
+	// covered by TestQueryFilterZeroValueHasNoPriorityConstraint.
+	var filter journal.QueryFilter
 
-	require.NotNil(t, emerg, "an explicit PRIORITY 0 (emerg) ceiling must be a non-nil *int")
-	assert.Equal(t, 0, *emerg, "the emerg ceiling dereferences to 0, distinct from a nil unset field")
+	filter.MaxPriority = new(0)
+
+	require.NotNil(t, filter.MaxPriority, "an explicit PRIORITY 0 (emerg) ceiling must round-trip as a non-nil *int")
+	assert.Equal(t, 0, *filter.MaxPriority, "the emerg ceiling dereferences to 0, distinct from a nil unset field")
 }
 
 func TestFieldConstants(t *testing.T) {
