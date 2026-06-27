@@ -2,10 +2,10 @@ package config
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/samber/mo"
+	"github.com/samber/oops"
 	"github.com/spf13/viper"
 )
 
@@ -30,25 +30,21 @@ func Load(path string) mo.Result[*Config] {
 	if err := viperInstance.ReadInConfig(); err != nil {
 		var notFoundErr viper.ConfigFileNotFoundError
 		if !errors.As(err, &notFoundErr) || path != "" {
-			return mo.Err[*Config](fmt.Errorf("config: read: %w", err))
+			return mo.Err[*Config](oops.In("config").Code("read_failed").Wrapf(err, "read config file"))
 		}
 	}
 
 	var cfg Config
 	if err := viperInstance.Unmarshal(&cfg); err != nil {
-		return mo.Err[*Config](fmt.Errorf("config: unmarshal: %w", err))
+		return mo.Err[*Config](oops.In("config").Code("unmarshal_failed").Wrapf(err, "unmarshal config"))
 	}
 
-	if err := cfg.Validate(); err != nil {
-		return mo.Err[*Config](err)
-	}
-
-	return mo.Ok(&cfg)
+	return mo.TupleToResult(&cfg, cfg.Validate())
 }
 
 func setDefaults(viperInstance *viper.Viper) {
 	viperInstance.SetDefault("app.name", "ana")
-	viperInstance.SetDefault("app.env", "development")
+	viperInstance.SetDefault("app.env", envDevelopment)
 	viperInstance.SetDefault("logging.level", "info")
 	viperInstance.SetDefault("logging.format", "pretty")
 }

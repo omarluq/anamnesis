@@ -1,4 +1,4 @@
-package main_test
+package main
 
 import (
 	"bufio"
@@ -10,8 +10,6 @@ import (
 	"github.com/samber/oops"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	evalmain "github.com/omarluq/anamnesis/evals"
 )
 
 const (
@@ -61,11 +59,11 @@ func TestLoadCasesRoundTrip(t *testing.T) {
 
 	path := writeJSONL(t, goldenLineOne+"\n"+goldenLineTwo+"\n")
 
-	cases, err := evalmain.LoadCases(path)
+	cases, err := LoadCases(path)
 	require.NoError(t, err)
 	require.Len(t, cases, 2)
 
-	wantOne := evalmain.GoldenCase{
+	wantOne := GoldenCase{
 		ExpectedTools:        []string{"journal.Boots", "journal.Counts", "journal.Query"},
 		ExpectedKeywords:     []string{keywordOOM, "memory", "checkout-api"},
 		ForbiddenKeywords:    []string{keywordUnknownError},
@@ -80,7 +78,7 @@ func TestLoadCasesRoundTrip(t *testing.T) {
 	}
 	assert.Equal(t, wantOne, cases[0])
 
-	wantTwo := evalmain.GoldenCase{
+	wantTwo := GoldenCase{
 		ExpectedTools:        []string{"journal.Boots", "journal.QueryBatched"},
 		ExpectedKeywords:     []string{"ssh.service", "boot"},
 		ForbiddenKeywords:    []string{"hallucinated"},
@@ -108,7 +106,7 @@ func TestLoadCasesSkipsBlankLines(t *testing.T) {
 
 	path := writeJSONL(t, "\n"+goldenLineOne+"\n\n   \n"+goldenLineTwo+"\n")
 
-	cases, err := evalmain.LoadCases(path)
+	cases, err := LoadCases(path)
 	require.NoError(t, err)
 
 	assert.Len(t, cases, 2)
@@ -126,7 +124,7 @@ func TestLoadCasesHandlesLargeLine(t *testing.T) {
 		`"judge_prompt_extension":"` + largeExtension + `"}`
 	require.Greater(t, len(record), bufio.MaxScanTokenSize)
 
-	cases, err := evalmain.LoadCases(writeJSONL(t, record+"\n"))
+	cases, err := LoadCases(writeJSONL(t, record+"\n"))
 	require.NoError(t, err)
 	require.Len(t, cases, 1)
 
@@ -139,7 +137,7 @@ func TestLoadCasesMalformedLineWrapsOops(t *testing.T) {
 
 	path := writeJSONL(t, goldenLineOne+"\n{\"id\":\"broken\", not valid json\n")
 
-	cases, err := evalmain.LoadCases(path)
+	cases, err := LoadCases(path)
 	require.Error(t, err)
 	assert.Nil(t, cases)
 
@@ -147,13 +145,13 @@ func TestLoadCasesMalformedLineWrapsOops(t *testing.T) {
 	require.ErrorAs(t, err, &oopsErr)
 	assert.Equal(t, "evals", oopsErr.Domain())
 	assert.Equal(t, "malformed_case", oopsErr.Code())
-	assert.Contains(t, err.Error(), "line 2")
+	assert.ErrorContains(t, err, "line 2")
 }
 
 func TestLoadCasesMissingFileWrapsOops(t *testing.T) {
 	t.Parallel()
 
-	cases, err := evalmain.LoadCases(filepath.Join(t.TempDir(), "absent.jsonl"))
+	cases, err := LoadCases(filepath.Join(t.TempDir(), "absent.jsonl"))
 	require.Error(t, err)
 	assert.Nil(t, cases)
 

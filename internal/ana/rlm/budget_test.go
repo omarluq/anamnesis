@@ -55,8 +55,9 @@ func TestBudgetLimitSentinels(t *testing.T) {
 			err := testCase.consume(budget)
 			require.Error(t, err)
 
-			oopsErr, ok := oops.AsOops(err)
-			require.True(t, ok)
+			var oopsErr oops.OopsError
+
+			require.ErrorAs(t, err, &oopsErr)
 			assert.Equal(t, testCase.code, oopsErr.Code())
 		})
 	}
@@ -74,8 +75,9 @@ func TestBudgetDepthGaugeRecovers(t *testing.T) {
 	err := budget.EnterDepth()
 	require.Error(t, err)
 
-	oopsErr, ok := oops.AsOops(err)
-	require.True(t, ok)
+	var oopsErr oops.OopsError
+
+	require.ErrorAs(t, err, &oopsErr)
 	assert.Equal(t, "budget_depth_exceeded", oopsErr.Code())
 
 	budget.ExitDepth()

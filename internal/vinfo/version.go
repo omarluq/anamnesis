@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"runtime/debug"
 	"strings"
+
+	"github.com/samber/lo"
+	"github.com/samber/mo"
 )
 
 const (
@@ -112,13 +115,14 @@ func fallbackVCSVersion(settings []debug.BuildSetting) string {
 }
 
 func buildInfoSetting(settings []debug.BuildSetting, key string) string {
-	for _, setting := range settings {
-		if setting.Key == key {
-			return strings.TrimSpace(setting.Value)
-		}
+	setting, found := lo.Find(settings, func(setting debug.BuildSetting) bool {
+		return setting.Key == key
+	})
+	if !found {
+		return ""
 	}
 
-	return ""
+	return strings.TrimSpace(setting.Value)
 }
 
 func shortRevision(revision string) string {
@@ -131,12 +135,7 @@ func shortRevision(revision string) string {
 }
 
 func metadataPart(value, fallback string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return fallback
-	}
-
-	return value
+	return mo.EmptyableToOption(strings.TrimSpace(value)).OrElse(fallback)
 }
 
 func versionPart(value string) string {

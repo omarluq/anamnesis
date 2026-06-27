@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/samber/lo"
@@ -44,14 +44,11 @@ func newConfigShowCmd() *cobra.Command {
 			env := resolveEnv(cfg.App.Env, "development")
 			envKeys := upperEnvKeys("ANAMNESIS", entries)
 
-			keys := lo.Map(entries, func(e configEntry, _ int) string { return e.key })
-			sort.Strings(keys)
-
-			lookup := lo.SliceToMap(entries, func(e configEntry) (string, string) {
-				return e.key, e.value
+			slices.SortFunc(entries, func(a, b configEntry) int {
+				return strings.Compare(a.key, b.key)
 			})
 
-			maxLen := lo.MaxBy(keys, func(a, b string) bool { return len(a) > len(b) })
+			widest := lo.MaxBy(entries, func(a, b configEntry) bool { return len(a.key) > len(b.key) })
 			writer := cmd.OutOrStdout()
 
 			if err := printLine(writer, "Environment: %s", env); err != nil {
@@ -66,8 +63,8 @@ func newConfigShowCmd() *cobra.Command {
 				return err
 			}
 
-			for _, key := range keys {
-				if err := printLine(writer, "%-*s  %s", len(maxLen), key, lookup[key]); err != nil {
+			for _, entry := range entries {
+				if err := printLine(writer, "%-*s  %s", len(widest.key), entry.key, entry.value); err != nil {
 					return err
 				}
 			}

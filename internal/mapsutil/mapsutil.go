@@ -1,7 +1,11 @@
 // Package mapsutil provides small map-copy helpers used across internal packages.
 package mapsutil
 
-import "maps"
+import (
+	"maps"
+
+	"github.com/samber/lo"
+)
 
 // CloneOrEmpty returns a copy of string values, or an initialized empty map for nil input.
 func CloneOrEmpty[V any](values map[string]V) map[string]V {
@@ -13,11 +17,9 @@ func CloneOrEmpty[V any](values map[string]V) map[string]V {
 }
 
 // ClonePreserveNil returns a copy of string values, or nil for nil input.
+// maps.Clone already preserves nil, so this is a thin, intent-revealing alias
+// that contrasts with CloneOrEmpty and CloneOrNil.
 func ClonePreserveNil[V any](values map[string]V) map[string]V {
-	if values == nil {
-		return nil
-	}
-
 	return maps.Clone(values)
 }
 
@@ -33,10 +35,7 @@ func CloneOrNil[V any](values map[string]V) map[string]V {
 // IntMapToAnyMap copies integer map values into a JSON-friendly any map.
 // A nil input is normalized to a non-nil empty map, so the result is never nil.
 func IntMapToAnyMap(values map[string]int) map[string]any {
-	cloned := make(map[string]any, len(values))
-	for key, value := range values {
-		cloned[key] = value
-	}
-
-	return cloned
+	return lo.MapValues(values, func(value int, _ string) any {
+		return value
+	})
 }
