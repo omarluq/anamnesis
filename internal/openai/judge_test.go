@@ -171,7 +171,7 @@ func TestJudgeRendersNoCitationsMarker(t *testing.T) {
 
 	body := captureJudgeRequest(t, "What failed at boot?", "Something went wrong with the network.", nil)
 
-	assert.Contains(t, string(body), "(none",
+	assert.Contains(t, string(body), "(none — the answer cited no journal entries)",
 		"a zero-citation answer renders the explicit no-grounding marker on the wire")
 }
 
