@@ -38,6 +38,7 @@ type UnitStatus struct {
 	// "exited", "failed", or "dead".
 	SubState string
 	// MainPID is the process identifier of the unit's main process, or zero
-	// when the unit has no running main process.
+	// when the unit has no running main process or its PID is unavailable —
+	// for example a non-service unit, or a MainPID property that cannot be read.
 	MainPID int
 }
