@@ -36,11 +36,16 @@ func New(cfg *Config) (*Interpreter, error) {
 	interpreter := NewInterpreter()
 
 	if err := cfg.Host.Register(interpreter); err != nil {
-		return nil, err
+		return nil, oops.
+			In("repl").
+			Code("session_host_register_failed").
+			Wrapf(err, "repl.New: register host surfaces")
 	}
 
-	// RegisterAgent must precede RegisterQuery so the query surface re-emits the
-	// terminal primitives onto the agent package rather than dropping them.
+	// RegisterAgent and RegisterQuery are order-independent — each re-emits the
+	// other's symbols when it re-imports the agent package — so the terminal and
+	// query primitives always coexist. They run agent-first here for a stable,
+	// readable wiring order, not because the order is required.
 	RegisterAgent(interpreter, cfg.Sink)
 	RegisterQuery(interpreter, cfg.Sub, cfg.Budget)
 

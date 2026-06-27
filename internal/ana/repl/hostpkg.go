@@ -2,9 +2,23 @@ package repl
 
 import (
 	"reflect"
+	"slices"
 
 	"github.com/samber/oops"
 )
+
+// nilableKinds are the reflect.Kinds whose values can be nil while still being a
+// valid reflect.Value. A surface of one of these kinds passes the IsValid guard
+// yet panics on the first method call when it carries a typed nil, so surfaceFuncs
+// rejects a nil one up front.
+var nilableKinds = []reflect.Kind{
+	reflect.Chan,
+	reflect.Func,
+	reflect.Interface,
+	reflect.Map,
+	reflect.Pointer,
+	reflect.Slice,
+}
 
 // RegisterSurface exposes a host surface to interpreted source as a Go package
 // named pkg. Every method declared on the Surface interface becomes a function
@@ -60,8 +74,8 @@ func typeBinding[T any]() reflect.Value {
 // ImportPackageValues consumes. It iterates the interface's own method set rather
 // than the concrete value's, so promoted methods on the receiver (for example a
 // testify mock's helpers) never leak into the exported package. It errors when the
-// surface declares no methods, the value is a nil interface, or a declared method
-// is missing on value.
+// surface declares no methods, the value is a nil or typed-nil surface, or a
+// declared method is missing on value.
 func surfaceFuncs(pkg string, surfaceType reflect.Type, value reflect.Value) (map[string]reflect.Value, error) {
 	count := surfaceType.NumMethod()
 	if count == 0 {
@@ -71,9 +85,13 @@ func surfaceFuncs(pkg string, surfaceType reflect.Type, value reflect.Value) (ma
 			Errorf("host surface %q declares no methods to register", pkg)
 	}
 
-	// A nil surface yields a zero reflect.Value, on which MethodByName would panic;
-	// report it as an oops error so the never-panic contract holds at the boundary.
-	if !value.IsValid() {
+	// A nil surface — an untyped nil (a zero reflect.Value, on which MethodByName
+	// would panic) or a typed nil such as a (*Client)(nil) that still satisfies the
+	// interface (whose bound methods would panic on the nil receiver) — is rejected
+	// as an oops error up front so the never-panic contract holds at the boundary
+	// for both shapes. The Kind guard precedes IsNil because IsNil panics on a
+	// non-nilable kind.
+	if !value.IsValid() || (slices.Contains(nilableKinds, value.Kind()) && value.IsNil()) {
 		return nil, oops.
 			In("repl").
 			Code("host_surface_nil").

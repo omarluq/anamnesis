@@ -41,12 +41,20 @@ type QueryBudget struct {
 	MaxSubCalls int
 }
 
+// queryBindings associates each interpreter with the queryRunner registered on
+// it, so RegisterAgent can re-emit Query and QueryBatched when it re-imports the
+// agent package after the query surface, keeping the two registrations
+// order-independent. An Interpreter is session-scoped, so at most one runner is
+// ever bound per key.
+var queryBindings sync.Map
+
 // RegisterQuery exposes the bounded sub-call primitives agent.Query and
 // agent.QueryBatched to interpreter, so controller source can fan a question out
 // to sub against the depth and sub-call ceilings in budget. Because mvm replaces a
 // package's symbol table wholesale on import, RegisterQuery re-emits the terminal
 // primitives RegisterAgent installed (FINAL, FINAL_VAR, Cite) alongside the query
-// pair, so the two registrations coexist on the agent package regardless of order.
+// pair, and RegisterAgent re-emits the query pair in turn, so the two
+// registrations coexist on the agent package regardless of order.
 func RegisterQuery(interpreter *Interpreter, sub SubLLM, budget QueryBudget) {
 	runner := &queryRunner{
 		sub:         sub,
@@ -64,6 +72,7 @@ func RegisterQuery(interpreter *Interpreter, sub SubLLM, budget QueryBudget) {
 
 	mergeAgentSurface(interpreter, symbols)
 	importSurface(interpreter, "agent", symbols)
+	queryBindings.Store(interpreter, runner)
 }
 
 // mergeAgentSurface adds the terminal primitives of the Agent already bound to
@@ -79,6 +88,35 @@ func mergeAgentSurface(interpreter *Interpreter, symbols map[string]reflect.Valu
 	symbols["FINAL"] = reflect.ValueOf(agent.recordFinal)
 	symbols["FINAL_VAR"] = reflect.ValueOf(agent.recordFinalVar)
 	symbols["Cite"] = reflect.ValueOf(agent.cite)
+}
+
+// mergeQuerySurface adds the bounded sub-call primitives of the queryRunner
+// already bound to interpreter into symbols, so re-importing the agent package
+// from RegisterAgent preserves Query and QueryBatched rather than dropping them.
+// It is a no-op when no query surface is bound, which is the case when a session
+// registers the agent surface alone or before the query surface.
+func mergeQuerySurface(interpreter *Interpreter, symbols map[string]reflect.Value) {
+	runner, ok := loadQueryRunner(interpreter)
+	if !ok {
+		return
+	}
+
+	symbols["Query"] = reflect.ValueOf(runner.query)
+	symbols["QueryBatched"] = reflect.ValueOf(runner.queryBatched)
+}
+
+// loadQueryRunner returns the queryRunner bound to interpreter and true, or nil
+// and false when none is bound. It centralizes the queryBindings lookup and type
+// assertion mergeQuerySurface relies on, mirroring loadAgent for the query side.
+func loadQueryRunner(interpreter *Interpreter) (*queryRunner, bool) {
+	bound, found := queryBindings.Load(interpreter)
+	if !found {
+		return nil, false
+	}
+
+	runner, ok := bound.(*queryRunner)
+
+	return runner, ok
 }
 
 // renderEvidence renders the ctx value agent.Query was handed into the evidence

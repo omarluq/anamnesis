@@ -127,6 +127,28 @@ func TestRegisterSurfaceRejectsNilSurface(t *testing.T) {
 	assert.Equal(t, "host_surface_nil", oopsErr.Code())
 }
 
+// TestRegisterSurfaceRejectsTypedNilSurface proves the bridge rejects a typed-nil
+// surface — a (*mockJournal)(nil) that still satisfies journalQuerier — with the
+// host_surface_nil oops error rather than binding methods that would panic on the
+// nil receiver at the first interpreted call. A typed nil is a valid reflect.Value,
+// so the plain IsValid guard misses it; the nilable-kind check is what catches it.
+func TestRegisterSurfaceRejectsTypedNilSurface(t *testing.T) {
+	t.Parallel()
+
+	interpreter := repl.NewInterpreter()
+
+	var surface journalQuerier = (*mockJournal)(nil)
+
+	err := repl.RegisterSurface[journalQuerier](interpreter, "journal", surface)
+	require.Error(t, err)
+
+	var oopsErr oops.OopsError
+
+	require.ErrorAs(t, err, &oopsErr)
+	assert.Equal(t, "repl", oopsErr.Domain())
+	assert.Equal(t, "host_surface_nil", oopsErr.Code())
+}
+
 // TestRegisterSurfaceRejectsEmptyInterface proves the bridge refuses a zero-method
 // interface type parameter: a surface that declares nothing to register yields an
 // oops error in the repl domain rather than installing an empty package.

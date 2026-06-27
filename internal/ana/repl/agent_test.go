@@ -183,3 +183,25 @@ func TestFinalWithoutAgentReportsNoAnswer(t *testing.T) {
 	assert.False(t, ok, "an interpreter with no agent registered signals no answer")
 	assert.Empty(t, answer)
 }
+
+// TestAgentFinalVarDegradesOnUnboundBareIdentifier proves a FINAL_VAR naming a
+// variable that was never bound degrades to "no answer" rather than echoing the
+// name back. The mvm engine resolves an unbound bare identifier shell-style to its
+// own bareword, so without the symbol-table guard agent.FINAL_VAR("missing") would
+// fabricate the answer "missing" for a variable that does not exist.
+func TestAgentFinalVarDegradesOnUnboundBareIdentifier(t *testing.T) {
+	t.Parallel()
+
+	interpreter := repl.NewInterpreter()
+	sink := new(mockCitationSink)
+	repl.RegisterAgent(interpreter, sink)
+
+	_, err := interpreter.Eval("turn_0", `agent.FINAL_VAR("missing")`)
+	require.NoError(t, err)
+
+	answer, ok := interpreter.Final()
+	assert.False(t, ok, "an unbound FINAL_VAR name signals no answer rather than its bareword")
+	assert.Empty(t, answer)
+
+	sink.AssertNotCalled(t, "Cite")
+}
