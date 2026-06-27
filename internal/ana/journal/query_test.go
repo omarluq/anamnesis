@@ -21,7 +21,7 @@ const bootSecond = "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
 const filterMaxPriority = 4
 
 // Query result cardinalities the behavioral cases assert against, derived from
-// testdata/sample.journal.json.
+// testdata/sample.journal.ndjson.
 const (
 	memoryPressureCount = 3
 	windowedCount       = 2
@@ -255,6 +255,38 @@ func TestQueryPropagatesAcquireFailure(t *testing.T) {
 	require.ErrorIs(t, err, assert.AnError)
 
 	factory.AssertExpectations(t)
+}
+
+// TestQueryNilFilterMatchesEverything pins the nil-filter contract for Client.Query:
+// the shared helpers normalize a nil *QueryFilter to an empty one, so the call cannot
+// panic and behaves like the zero-value "match everything" filter, returning every
+// fixture record.
+func TestQueryNilFilterMatchesEverything(t *testing.T) {
+	t.Parallel()
+
+	client := journal.NewClientWithFactory(newFixtureFactory(t), 1)
+
+	entries, err := client.Query(nil)
+	require.NoError(t, err)
+	assert.Len(t, entries, fixtureRecordCount)
+
+	require.NoError(t, client.Close())
+}
+
+// TestUniqueNilFilterMatchesEverything pins the same contract for Client.Unique,
+// whose nil filter reaches applyMatches and keep through counts.go: normalizing nil
+// to an empty filter keeps the scan panic-free and yields the distinct field values
+// across every entry, identical to the explicit empty-filter result.
+func TestUniqueNilFilterMatchesEverything(t *testing.T) {
+	t.Parallel()
+
+	client := journal.NewClientWithFactory(newFixtureFactory(t), 1)
+
+	values, err := client.Unique(journal.FieldUnit, nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{unitCron, unitNginx, unitSSH, unitOomd}, values)
+
+	require.NoError(t, client.Close())
 }
 
 // queryErrCase drives one journald error-propagation branch of Query: script

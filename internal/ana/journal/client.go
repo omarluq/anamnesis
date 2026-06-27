@@ -96,7 +96,7 @@ func (client *Client) Acquire() (Reader, error) {
 	if last < 0 {
 		client.mutex.Unlock()
 
-		return client.factory.NewReader()
+		return client.acquireFresh()
 	}
 
 	reader := client.idle[last]
@@ -156,6 +156,29 @@ func (client *Client) Close() error {
 	})
 
 	return errors.Join(errs...)
+}
+
+// acquireFresh opens a brand-new Reader through the factory with the pool lock
+// released — opening a journal handle can block — then re-checks the closed flag
+// under the lock before handing the Reader out. Without that re-check a Close that
+// raced between Acquire's first closed-check and this open would leak a live Reader
+// the Client no longer tracks; instead the fresh Reader is closed and
+// errClientClosed is reported, so Acquire rejects consistently once Close has run.
+func (client *Client) acquireFresh() (Reader, error) {
+	reader, err := client.factory.NewReader()
+	if err != nil {
+		return nil, err
+	}
+
+	client.mutex.Lock()
+	closed := client.closed
+	client.mutex.Unlock()
+
+	if closed {
+		return nil, errors.Join(errClientClosed, reader.Close())
+	}
+
+	return reader, nil
 }
 
 // withReader borrows a pooled Reader for operation, runs work against it and

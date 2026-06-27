@@ -25,7 +25,8 @@ const (
 // Go over the decoded entries. The result is capped at filter.Limit, which defaults
 // to 1000 when unset and is clamped to a maximum of 10000. Query borrows a pooled
 // Reader for the call and releases it before returning. filter crosses by pointer
-// so the heavy struct is not copied, matching the host surface contract.
+// so the heavy struct is not copied, matching the host surface contract. A nil
+// filter is normalized to an empty QueryFilter and so matches every entry.
 func (client *Client) Query(filter *QueryFilter) ([]Entry, error) {
 	return withReader(client, "query", func(reader Reader) ([]Entry, error) {
 		return runQuery(reader, filter)
@@ -46,10 +47,27 @@ func runQuery(reader Reader, filter *QueryFilter) ([]Entry, error) {
 	return collect(reader, filter)
 }
 
+// orEmptyFilter normalizes a possibly-nil filter into a non-nil one so the shared
+// helpers never dereference a nil pointer. Client.Query and Client.Unique both reach
+// applyMatches, collect and keep with a caller-supplied *QueryFilter that may be nil;
+// treating nil as an empty filter keeps those helpers panic-free and honors the
+// zero-value "match everything" contract documented on QueryFilter.
+func orEmptyFilter(filter *QueryFilter) *QueryFilter {
+	if filter != nil {
+		return filter
+	}
+
+	var empty QueryFilter
+
+	return &empty
+}
+
 // applyMatches records the journald-native constraints — Unit, BootID and the
 // MaxPriority disjunction — on reader so it yields only the records the filter
 // admits at the journal layer; Grep and the time window are left to collect.
 func applyMatches(reader Reader, filter *QueryFilter) error {
+	filter = orEmptyFilter(filter)
+
 	if filter.Unit != "" {
 		if err := addMatch(reader, FieldUnit, filter.Unit); err != nil {
 			return err
@@ -100,6 +118,8 @@ func addMatch(reader Reader, field, value string) error {
 // and keeping those that pass the in-Go predicate, until the clamped limit is
 // reached or the journal is exhausted.
 func collect(reader Reader, filter *QueryFilter) ([]Entry, error) {
+	filter = orEmptyFilter(filter)
+
 	limit := clampLimit(filter.Limit)
 	entries := make([]Entry, 0, min(limit, defaultLimit))
 
@@ -131,6 +151,8 @@ func collect(reader Reader, filter *QueryFilter) ([]Entry, error) {
 // substring match for Grep and the inclusive [Since, Until] realtime window. Zero
 // value filter fields impose no constraint.
 func keep(entry *Entry, filter *QueryFilter) bool {
+	filter = orEmptyFilter(filter)
+
 	if filter.Grep != "" && !strings.Contains(entry.Message, filter.Grep) {
 		return false
 	}

@@ -264,6 +264,67 @@ func TestClientReleaseOverflowClosesReaderWhileOpen(t *testing.T) {
 	factory.AssertExpectations(t)
 }
 
+// blockingFactory opens a Reader but blocks each NewReader call until released, so a
+// test can wedge a Close between Acquire's closed-check and the factory open that
+// follows it. entered closes once NewReader is reached; release unblocks the open.
+type blockingFactory struct {
+	reader  journal.Reader
+	entered chan struct{}
+	release chan struct{}
+}
+
+// NewReader signals that the open was reached, blocks until released, then returns
+// the scripted Reader.
+func (f *blockingFactory) NewReader() (journal.Reader, error) {
+	close(f.entered)
+	<-f.release
+
+	return f.reader, nil
+}
+
+// acquireResult carries an Acquire outcome back from the worker goroutine.
+type acquireResult struct {
+	reader journal.Reader
+	err    error
+}
+
+func TestClientAcquireRacingCloseRejectsFreshReader(t *testing.T) {
+	t.Parallel()
+
+	pooled := newPooledReader()
+	factory := &blockingFactory{
+		reader:  pooled,
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+
+	client := journal.NewClientWithFactory(factory, 2)
+	results := make(chan acquireResult, 1)
+
+	go func() {
+		reader, err := client.Acquire()
+		results <- acquireResult{reader: reader, err: err}
+	}()
+
+	// Wait until Acquire has passed its closed-check and is inside the factory open
+	// with the pool lock released, then close the Client underneath it.
+	<-factory.entered
+	require.NoError(t, client.Close())
+	close(factory.release)
+
+	result := <-results
+	assert.Nil(t, result.reader, "a fresh reader must not escape once Close has run")
+	require.Error(t, result.err)
+
+	var oopsErr oops.OopsError
+
+	require.ErrorAs(t, result.err, &oopsErr)
+	assert.Equal(t, "client_closed", oopsErr.Code())
+
+	// The fresh Reader the factory opened must be closed, not leaked to the caller.
+	pooled.AssertNumberOfCalls(t, "Close", 1)
+}
+
 func TestClientConcurrentAcquireNeverDoubleHandsReader(t *testing.T) {
 	t.Parallel()
 

@@ -17,10 +17,10 @@ import (
 
 // fixturePath points at the stored "journalctl --output=json" export the fake
 // reader replays; the path is relative to the package directory under testdata.
-const fixturePath = "testdata/sample.journal.json"
+const fixturePath = "testdata/sample.journal.ndjson"
 
 // Fixture cardinalities the self-tests assert against, derived from
-// testdata/sample.journal.json. They double as readable names for the otherwise
+// testdata/sample.journal.ndjson. They double as readable names for the otherwise
 // opaque match counts.
 const (
 	fixtureRecordCount = 13
