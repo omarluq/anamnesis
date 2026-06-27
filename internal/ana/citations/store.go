@@ -17,8 +17,8 @@ import (
 
 // Store tracks the journal cursors a session has made visible and the entries it
 // has cited, so Validate can reject any citation whose cursor was never seen. The
-// zero value is not usable; construct one with NewStore. A Store is safe for
-// concurrent use and must not be copied after first use.
+// zero value is safe to use; NewStore merely preallocates the visible set. A Store
+// is safe for concurrent use and must not be copied after first use.
 type Store struct {
 	visible map[string]struct{}
 	cited   []journal.Entry
@@ -39,6 +39,10 @@ func NewStore() *Store {
 func (store *Store) RecordVisible(entries []journal.Entry) {
 	store.mutex.Lock()
 	defer store.mutex.Unlock()
+
+	if store.visible == nil {
+		store.visible = make(map[string]struct{})
+	}
 
 	for index := range entries {
 		cursor := entries[index].Cursor
