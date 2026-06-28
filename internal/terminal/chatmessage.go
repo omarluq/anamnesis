@@ -12,10 +12,8 @@ const (
 	welcomeText = "Type a message and press Enter to begin."
 	// queryName labels every recursive sub-call block as the agent.Query primitive.
 	queryName = "agent.Query"
-	// thinkingLabel heads an expanded thinking block.
+	// thinkingLabel heads a thinking block (always shown in full).
 	thinkingLabel = "thinking"
-	// thinkingCollapsed is the one-line stand-in for a collapsed thinking block.
-	thinkingCollapsed = "thinking…"
 )
 
 // chatMessage is one entry in the scrolling transcript: a role plus its rendered

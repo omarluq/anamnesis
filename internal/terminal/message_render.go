@@ -76,18 +76,11 @@ func (app *App) renderAssistantMessage(width int, content string) []tui.Line {
 	return lines
 }
 
-// renderThinkingMessage renders a reasoning turn. When collapsed it is the single
-// dim/italic "thinking…" stand-in; when expanded it is the markdown reasoning with
-// the dim/italic overlay merged onto every line under a bold "thinking" label.
+// renderThinkingMessage renders a reasoning turn as the markdown reasoning with the
+// dim/italic overlay merged onto every line under a bold "thinking" label. Thinking
+// is always shown in full — there is no collapsed form.
 func (app *App) renderThinkingMessage(width int, content string) []tui.Line {
 	style := app.theme.fg(app.theme.ThinkingText).Italic(true)
-	if app.hideThinking {
-		return []tui.Line{
-			tui.NewLine(tcell.StyleDefault, ""),
-			tui.NewLine(style, thinkingCollapsed),
-			tui.NewLine(tcell.StyleDefault, ""),
-		}
-	}
 
 	markdownLines := app.renderMarkdown(strings.TrimSpace(content), width)
 	lines := make([]tui.Line, 0, len(markdownLines)+messageMetadataRows)

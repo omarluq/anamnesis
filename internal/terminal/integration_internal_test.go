@@ -68,7 +68,7 @@ func TestAppIntegrationReplayDrivesTranscriptAndDropsStaleRunID(t *testing.T) {
 
 	contents := screen.contents()
 	assert.Contains(t, contents, integrationQuery, "the user prompt box renders")
-	assert.Contains(t, contents, thinkingCollapsed, "a collapsed (dim) thinking block renders")
+	assert.Contains(t, contents, thinkingLabel, "the dim thinking block renders, always expanded")
 	assert.Contains(t, contents, queryName, "the nested query block header renders")
 	assert.Contains(t, contents, "i915 GPU driver oopsed", "the nested query block shows its output")
 	assert.Contains(t, contents, "pin the firmware", "the assistant markdown answer renders")

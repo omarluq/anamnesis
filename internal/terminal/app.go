@@ -64,15 +64,13 @@ type App struct {
 	spinnerFrame int
 
 	caretVisible  bool
-	hideThinking  bool
 	toolsExpanded bool
 	dirty         bool
 	working       bool
 }
 
-// newApp builds an App bound to screen with the default theme. Thinking blocks
-// start collapsed and query blocks start unexpanded, matching the chat's low-noise
-// default.
+// newApp builds an App bound to screen with the default theme. Query blocks start
+// unexpanded, matching the chat's low-noise default; thinking is always shown.
 func newApp(screen tcell.Screen, opts RunOptions) *App {
 	title := mo.EmptyableToOption(opts.Title).OrElse(defaultTitle)
 
@@ -94,7 +92,6 @@ func newApp(screen tcell.Screen, opts RunOptions) *App {
 		runID:         0,
 		spinnerFrame:  0,
 		caretVisible:  false,
-		hideThinking:  true,
 		toolsExpanded: false,
 		dirty:         false,
 		working:       false,
@@ -355,21 +352,17 @@ func (app *App) isQuitKey(keyEvent tui.KeyEvent) bool {
 	}
 }
 
-// applyToggle handles the collapse toggles and reports whether it consumed the
-// key: ctrl+t flips thinking blocks, ctrl+o flips query-block expansion.
+// applyToggle handles the query-block collapse toggle and reports whether it
+// consumed the key: ctrl+o flips query-block expansion. Thinking is always shown in
+// full, so there is no thinking toggle.
 func (app *App) applyToggle(keyEvent tui.KeyEvent) bool {
-	switch keyEvent.Key {
-	case "ctrl+t":
-		app.hideThinking = !app.hideThinking
-
-		return true
-	case "ctrl+o":
+	if keyEvent.Key == "ctrl+o" {
 		app.toolsExpanded = !app.toolsExpanded
 
 		return true
-	default:
-		return false
 	}
+
+	return false
 }
 
 // composerKey routes a normalized key into the composer and returns the query
@@ -392,8 +385,14 @@ func (app *App) composerKey(keyEvent tui.KeyEvent) string {
 }
 
 // submit appends the trimmed composer text as a user message, clears the composer,
-// and returns the submitted query, or an empty string when it held only whitespace.
+// and returns the submitted query, or an empty string when it held only whitespace
+// or a run is already active. Enter is ignored mid-run so it neither clears the
+// composer nor echoes a phantom user message for a request startRun would refuse.
 func (app *App) submit() string {
+	if app.working {
+		return ""
+	}
+
 	return app.appendUser(app.composer.Clear())
 }
 

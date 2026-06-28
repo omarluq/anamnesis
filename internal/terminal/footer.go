@@ -15,7 +15,7 @@ const (
 	// footerSeparator joins the footer's title, usage, and key-hint segments.
 	footerSeparator = "  ·  "
 	// footerKeyHints lists the shell's key bindings in the status footer.
-	footerKeyHints = "ctrl+t thinking · ctrl+o queries · enter send · ctrl+c quit"
+	footerKeyHints = "ctrl+o queries · enter send · ctrl+c quit"
 )
 
 // footerLine builds the single status-footer row: the title (with a spinner while

@@ -23,7 +23,6 @@ func TestNewAppDefaultsTitleAndCollapsedState(t *testing.T) {
 	assert.Equal(t, defaultTitle, app.title)
 	assert.Empty(t, app.history, "the transcript starts empty")
 	assert.True(t, app.composer.Empty(), "the composer starts empty")
-	assert.True(t, app.hideThinking, "thinking blocks start collapsed")
 	assert.False(t, app.toolsExpanded, "query blocks start unexpanded")
 
 	custom := newApp(screen, RunOptions{Trace: nil, Controller: nil, Title: "custom"})
@@ -126,7 +125,7 @@ func TestApplyTraceQueryEventsKeepWorkingUntilFinal(t *testing.T) {
 	assert.False(t, app.working, "the final answer clears the working state")
 }
 
-func TestQueryToggleAndThinkingToggleRevealContent(t *testing.T) {
+func TestQueryToggleRevealsContentWithThinkingAlwaysShown(t *testing.T) {
 	t.Parallel()
 
 	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
@@ -136,17 +135,15 @@ func TestQueryToggleAndThinkingToggleRevealContent(t *testing.T) {
 	app.applyTrace(traceDepthEvent(TraceKindQueryEnd, "boot 3 panicked", 1))
 
 	collapsed := transcriptText(app, 80)
-	assert.Contains(t, collapsed, thinkingCollapsed, "thinking starts collapsed to a one-liner")
-	assert.NotContains(t, collapsed, "weighing the boots", "collapsed thinking hides its content")
+	assert.Contains(t, collapsed, "weighing the boots", "thinking is always shown in full, never collapsed")
 	assert.Contains(t, collapsed, "agent.Query", "the query block header always shows")
 	assert.Contains(t, collapsed, "boot 3 panicked", "the collapsed query block previews its output")
 	assert.NotContains(t, collapsed, labelArgs+":", "a collapsed query block hides its args section")
 
-	require.True(t, toggleKey(app, "ctrl+t"), "ctrl+t toggles thinking")
 	require.True(t, toggleKey(app, "ctrl+o"), "ctrl+o toggles query expansion")
 
 	expanded := transcriptText(app, 80)
-	assert.Contains(t, expanded, "weighing the boots", "expanded thinking reveals its content")
+	assert.Contains(t, expanded, "weighing the boots", "thinking stays visible after the query toggle")
 	assert.Contains(t, expanded, labelArgs+":", "an expanded query block shows its args section")
 	assert.Contains(t, expanded, labelOutput+":", "an expanded query block shows its output section")
 }
