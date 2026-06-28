@@ -286,6 +286,54 @@ func TestControllerRequestSendsModelTokenCapAndStrictSchema(t *testing.T) {
 	assert.True(t, payload.Text.Format.Strict, "strict structured-output adherence is enabled")
 }
 
+func TestControllerDecodesAnswerSplitAcrossTwoMessages(t *testing.T) {
+	t.Parallel()
+
+	// gpt-5.5 occasionally returns the structured answer as more than one output
+	// message item. resp.OutputText concatenates them, so the decoder sees
+	// "{...}{...}" — which a plain json.Unmarshal rejects as trailing data with
+	// "invalid character '{' after top-level value". The controller must still
+	// decode the first (authoritative) object and resolve the turn.
+	reply := openai.ControllerResponse{
+		Thinking: "inspect the failed unit before concluding",
+		Code:     "boots := journal.Boots()\nfmt.Println(len(boots))",
+		Done:     false,
+	}
+
+	inner, err := json.Marshal(reply)
+	require.NoError(t, err)
+
+	object, err := json.Marshal(string(inner))
+	require.NoError(t, err)
+
+	message := func(id string) string {
+		return `{"id":"msg_` + id + `","type":"message","role":"assistant","status":"completed",` +
+			`"content":[{"type":"output_text","text":` + string(object) + `,"annotations":[]}]}`
+	}
+	doubled := `{"id":"resp_test","object":"response","created_at":1,"status":"completed",` +
+		`"model":"` + openai.Model + `","output":[` + message("a") + `,` + message("b") + `],` +
+		`"usage":{"input_tokens":12,"output_tokens":8,"total_tokens":20,` +
+		`"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":0}}}`
+
+	transport := new(mockTransport)
+	transport.
+		On("RoundTrip", mock.Anything).
+		Return(http.StatusOK, doubled, nil).
+		Once()
+
+	client := newControllerClient(t, transport)
+
+	result, err := client.Controller(context.Background(), "system prompt", "USER: why did sshd fail?")
+	require.NoError(t, err, "two concatenated objects must not fail the turn")
+
+	assert.Equal(t, reply, result.Response, "the first of the two concatenated objects is the decoded answer")
+	assert.Equal(t, openai.Usage{TokensIn: 12, TokensOut: 8}, result.Usage,
+		"usage is still read from the envelope")
+
+	transport.AssertExpectations(t)
+	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
+}
+
 func TestControllerSurfacesMalformedReplyAsDecodeError(t *testing.T) {
 	t.Parallel()
 
