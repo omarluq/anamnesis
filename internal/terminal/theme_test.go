@@ -17,7 +17,7 @@ func TestDefaultThemeColorsAreNonZero(t *testing.T) {
 		theme.Text, theme.Accent, theme.Success, theme.Warning, theme.Dim,
 		theme.Muted, theme.Border, theme.DiffAdd, theme.DiffDel,
 		theme.UserMessageBg, theme.ToolPendingBg, theme.ToolSuccessBg,
-		theme.ToolErrorBg, theme.ThinkingText,
+		theme.ToolErrorBg, theme.ToolReviseBg, theme.ThinkingText,
 	}
 
 	for index, color := range colors {
@@ -60,20 +60,6 @@ func TestThemeTextAreaStylesAreNonZero(t *testing.T) {
 	assert.NotEqual(t, tcell.StyleDefault, styles.Body)
 }
 
-func TestThemeListStylesAreNonZero(t *testing.T) {
-	t.Parallel()
-
-	styles := terminal.DefaultTheme().ListStyles()
-	all := []tcell.Style{
-		styles.Border, styles.Accent, styles.Muted,
-		styles.Text, styles.Selected, styles.Dim,
-	}
-
-	for index, style := range all {
-		assert.NotEqualf(t, tcell.StyleDefault, style, "list style %d must be set", index)
-	}
-}
-
 func TestThemeStyleSetsAreDistinct(t *testing.T) {
 	t.Parallel()
 
@@ -93,5 +79,4 @@ func TestThemeBuildsUsableTuiStyleSets(t *testing.T) {
 	assert.NotEqual(t, tcell.ColorDefault, theme.CodeTheme().Accent)
 	assert.NotEqual(t, tcell.StyleDefault, theme.MarkdownStyles().Text)
 	assert.NotEqual(t, tcell.StyleDefault, theme.TextAreaStyles().Body)
-	assert.NotEqual(t, tcell.StyleDefault, theme.ListStyles().Text)
 }

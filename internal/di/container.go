@@ -2,8 +2,6 @@
 package di
 
 import (
-	"context"
-
 	"github.com/samber/do/v2"
 	"github.com/samber/oops"
 )
@@ -26,12 +24,16 @@ func NewContainer(configPath string) (*Container, error) {
 			Wrapf(err, "initialize container")
 	}
 
-	return &Container{injector: injector}, nil
-}
+	// Resolve the logger eagerly so slog.SetDefault runs at startup and logging
+	// is installed to its file before any service emits a record.
+	if _, err := do.Invoke[*LoggerService](injector); err != nil {
+		return nil, oops.
+			In("di").
+			Code("container_init").
+			Wrapf(err, "initialize logging")
+	}
 
-// ShutdownWithContext stops all registered services using the given context.
-func (c *Container) ShutdownWithContext(ctx context.Context) *do.ShutdownReport {
-	return c.injector.ShutdownWithContext(ctx)
+	return &Container{injector: injector}, nil
 }
 
 // MustInvoke resolves a dependency and panics if it cannot be created.

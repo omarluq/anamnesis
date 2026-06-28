@@ -85,9 +85,3 @@ func NewClient(opts ...Option) (*Client, error) {
 
 	return &Client{api: openaisdk.NewClient(requestOpts...)}, nil
 }
-
-// API exposes the underlying openai-go client for the Responses calls the
-// controller, sub-LLM, and judge layers issue.
-func (client *Client) API() *openaisdk.Client {
-	return &client.api
-}

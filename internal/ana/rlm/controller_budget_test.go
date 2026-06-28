@@ -6,7 +6,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/samber/oops"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -101,7 +103,7 @@ func TestControllerRunRecoversOverBudgetQueryPanic(t *testing.T) {
 		Return(doneTurn, nil).
 		Once()
 
-	eval.On("Eval", "turn_0", code).Panic(panicMsg).Once()
+	eval.On("EvalContext", mock.Anything, mock.Anything, "turn_0", code).Panic(panicMsg).Once()
 	eval.On("Final").Return(answer, true).Once()
 
 	got, err := controller.Run(ctx)
@@ -117,6 +119,51 @@ func TestControllerRunRecoversOverBudgetQueryPanic(t *testing.T) {
 	event := <-fixture.events
 	assert.Equal(t, terminal.TraceKindThinking, event.Kind)
 	assert.Equal(t, codeTurn.Thinking, event.Text)
+
+	fixture.controller.AssertExpectations(t)
+	eval.AssertExpectations(t)
+}
+
+func TestControllerRunForceFinishesOnEvalTimeout(t *testing.T) {
+	t.Parallel()
+
+	// A turn whose generated Go never returns surfaces from EvalContext as an
+	// eval_timed_out error: the loop records the turn with the timeout cause and the
+	// partial stdout printed before it wedged, then force-finishes — distinct from the
+	// recoverable over-budget panic — because the abandoned eval goroutine poisons the
+	// interpreter, so a following turn must not run against it.
+	ctx := context.Background()
+	fixture := newSessionFixture()
+	eval := new(mockEvalCapture)
+	controller := rlm.NewController(&fixture.session, eval)
+
+	code := `for { fmt.Println("scanning") }`
+	partial := "scanning\nscanning\n"
+	timeoutErr := oops.
+		In("repl").
+		Code("eval_timed_out").
+		Errorf("eval %q exceeded %s; the generated code did not return (possible non-terminating loop)",
+			"turn_0", 10*time.Minute)
+	codeTurn := openai.ControllerResponse{Thinking: "loop over the boots", Code: code, Done: false}
+
+	fixture.controller.
+		On("Respond", ctx, fixtureSystemPrompt, fixtureQuestion, "").
+		Return(codeTurn, nil).
+		Once()
+	eval.
+		On("EvalContext", mock.Anything, mock.Anything, "turn_0", code).
+		Return(repl.Result{Retval: reflect.Value{}, Stdout: partial}, timeoutErr).
+		Once()
+
+	got, err := controller.Run(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "investigation incomplete, partial findings: "+partial, got)
+
+	require.Len(t, fixture.session.History, 1)
+	recorded := fixture.session.History[0]
+	assert.Equal(t, code, recorded.Code)
+	assert.Equal(t, partial, recorded.Stdout)
+	assert.Contains(t, recorded.Err, "did not return")
 
 	fixture.controller.AssertExpectations(t)
 	eval.AssertExpectations(t)
@@ -148,8 +195,8 @@ func scriptTurnEvals(eval *mockEvalCapture, code string, count int) []string {
 		findings = append(findings, stdout)
 
 		eval.
-			On("Eval", fmt.Sprintf("turn_%d", turn), code).
-			Return(repl.Result{Retval: reflect.Value{}, Stdout: stdout, Stderr: ""}, nil).
+			On("EvalContext", mock.Anything, mock.Anything, fmt.Sprintf("turn_%d", turn), code).
+			Return(repl.Result{Retval: reflect.Value{}, Stdout: stdout}, nil).
 			Once()
 	}
 
@@ -172,35 +219,29 @@ func drainTrace(events <-chan terminal.TraceEvent) []terminal.TraceEvent {
 	}
 }
 
-// assertTurnEvents proves the loop streamed each of wantTurns recorded turns as a
-// thinking event followed by its code block: it asserts exactly wantTurns thinking
-// events (each carrying the reasoning and this run's ID) and a matching
-// code-start/code-end pair per turn.
+// assertTurnEvents proves the loop streamed each of wantTurns recorded turns in
+// execution order — a thinking event (carrying the reasoning and this run's ID),
+// then its code-start, then its code-end — exactly three events per turn in that
+// sequence. Asserting the per-turn ORDER, not just per-kind totals, catches a
+// regression that streamed every thinking first and every code block afterward,
+// which the streaming contract forbids.
 func assertTurnEvents(t *testing.T, events []terminal.TraceEvent, thinking string, wantTurns int) {
 	t.Helper()
 
-	thinkingCount, codeStarts, codeEnds := 0, 0, 0
+	require.Len(t, events, wantTurns*3, "each recorded turn streams thinking, then code-start, then code-end")
 
-	for _, event := range events {
-		assert.Equal(t, fixtureRunID, event.RunID)
+	for turn := range wantTurns {
+		thinkingEvent := events[turn*3]
+		codeStart := events[turn*3+1]
+		codeEnd := events[turn*3+2]
 
-		switch event.Kind {
-		case terminal.TraceKindThinking:
-			thinkingCount++
+		assert.Equal(t, terminal.TraceKindThinking, thinkingEvent.Kind, "turn %d opens with its thinking", turn)
+		assert.Equal(t, thinking, thinkingEvent.Text, "turn %d carries the controller's reasoning", turn)
+		assert.Equal(t, terminal.TraceKindCodeStart, codeStart.Kind, "turn %d streams code-start after thinking", turn)
+		assert.Equal(t, terminal.TraceKindCodeEnd, codeEnd.Kind, "turn %d streams code-end after code-start", turn)
 
-			assert.Equal(t, thinking, event.Text)
-		case terminal.TraceKindCodeStart:
-			codeStarts++
-		case terminal.TraceKindCodeEnd:
-			codeEnds++
-		case terminal.TraceKindThinkingDelta,
-			terminal.TraceKindQueryStart,
-			terminal.TraceKindQueryEnd,
-			terminal.TraceKindFinal:
+		for _, event := range []terminal.TraceEvent{thinkingEvent, codeStart, codeEnd} {
+			assert.Equal(t, fixtureRunID, event.RunID, "turn %d events carry the run ID", turn)
 		}
 	}
-
-	assert.Equal(t, wantTurns, thinkingCount, "one thinking event per recorded turn")
-	assert.Equal(t, wantTurns, codeStarts, "one code-start per turn with code")
-	assert.Equal(t, wantTurns, codeEnds, "one code-end per turn with code")
 }

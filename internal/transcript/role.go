@@ -21,21 +21,3 @@ const (
 	// RoleCompactionSummary is summary context for compacted history.
 	RoleCompactionSummary Role = "compactionSummary"
 )
-
-// CanMergeStreamingRole reports whether adjacent streaming transcript blocks with
-// the same role can be joined without changing their meaning.
-func CanMergeStreamingRole(role Role) bool {
-	switch role {
-	case RoleAssistant, RoleThinking:
-		return true
-	case RoleUser,
-		RoleToolResult,
-		RoleCustom,
-		RoleBashExecution,
-		RoleBranchSummary,
-		RoleCompactionSummary:
-		return false
-	default:
-		return false
-	}
-}

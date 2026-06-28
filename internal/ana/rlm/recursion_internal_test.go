@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,13 +15,14 @@ import (
 // tracedQuery records one QueryStart or QueryEnd lifecycle call.
 type tracedQuery struct {
 	text  string
+	id    uint64
 	depth int
 }
 
 // recordingTracer captures the QueryStart/QueryEnd lifecycle a recursiveSub
-// drives, so a test can assert the depth and text each event carried. The mutex
-// keeps it safe for the concurrent fan-out paths even though the adapter-logic
-// tests drive it sequentially.
+// drives, so a test can assert the id, depth, and text each event carried. The
+// mutex keeps it safe for the concurrent fan-out paths even though the
+// adapter-logic tests drive it sequentially.
 type recordingTracer struct {
 	startCalls []tracedQuery
 	endCalls   []tracedQuery
@@ -30,20 +32,20 @@ type recordingTracer struct {
 // Compile-time assertion that the recorder satisfies the tracer seam.
 var _ QueryTracer = (*recordingTracer)(nil)
 
-// QueryStart records the start of a sub-call.
-func (r *recordingTracer) QueryStart(prompt string, depth int) {
+// QueryStart records the start of sub-call queryID.
+func (r *recordingTracer) QueryStart(queryID uint64, prompt string, depth int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.startCalls = append(r.startCalls, tracedQuery{text: prompt, depth: depth})
+	r.startCalls = append(r.startCalls, tracedQuery{text: prompt, id: queryID, depth: depth})
 }
 
-// QueryEnd records the completion of a sub-call.
-func (r *recordingTracer) QueryEnd(result string, depth int) {
+// QueryEnd records the completion of sub-call queryID.
+func (r *recordingTracer) QueryEnd(queryID uint64, result string, depth int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.endCalls = append(r.endCalls, tracedQuery{text: result, depth: depth})
+	r.endCalls = append(r.endCalls, tracedQuery{text: result, id: queryID, depth: depth})
 }
 
 // mockLeafSub is a testify mock of the leaf sub-LLM seam the flat base case calls,
@@ -109,11 +111,12 @@ func TestRecursiveSubLeafFallsBackToFlatCall(t *testing.T) {
 	leafSub.On("Answer", ctx, "leaf prompt", "[evidence]").Return("flat answer", nil).Once()
 
 	sub := &recursiveSub{
-		budget:  budget,
-		tracer:  tracer,
-		rc:      RecursionContext{CurrentDepth: 2, MaxDepth: 2},
-		leaf:    func(prompt, evidence string) (string, error) { return leafSub.Answer(ctx, prompt, evidence) },
-		descend: failingDescend(t),
+		queryIDs: new(atomic.Uint64),
+		budget:   budget,
+		tracer:   tracer,
+		rc:       RecursionContext{CurrentDepth: 2, MaxDepth: 2},
+		leaf:     func(prompt, evidence string) (string, error) { return leafSub.Answer(ctx, prompt, evidence) },
+		descend:  failingDescend(t),
 	}
 
 	answer, err := sub.Sub("leaf prompt", "[evidence]")
@@ -122,7 +125,7 @@ func TestRecursiveSubLeafFallsBackToFlatCall(t *testing.T) {
 	leafSub.AssertExpectations(t)
 
 	require.Len(t, tracer.startCalls, 1)
-	assert.Equal(t, 2, tracer.startCalls[0].depth, "the tracer sees the leaf node's depth")
+	assert.Equal(t, 3, tracer.startCalls[0].depth, "the leaf sub-call renders one level under its node depth")
 }
 
 func TestRecursiveSubRecursesAndTracesDepth(t *testing.T) {
@@ -134,10 +137,11 @@ func TestRecursiveSubRecursesAndTracesDepth(t *testing.T) {
 	var descended RecursionContext
 
 	sub := &recursiveSub{
-		budget: budget,
-		tracer: tracer,
-		rc:     RecursionContext{CurrentDepth: 0, MaxDepth: 3},
-		leaf:   failingLeaf(t),
+		queryIDs: new(atomic.Uint64),
+		budget:   budget,
+		tracer:   tracer,
+		rc:       RecursionContext{CurrentDepth: 0, MaxDepth: 3},
+		leaf:     failingLeaf(t),
 		descend: func(child RecursionContext, _, _ string) (string, error) {
 			descended = child
 
@@ -152,8 +156,10 @@ func TestRecursiveSubRecursesAndTracesDepth(t *testing.T) {
 	assert.Equal(t, 3, descended.MaxDepth, "the child keeps the tree's MaxDepth")
 
 	require.Len(t, tracer.startCalls, 1)
-	assert.Equal(t, 0, tracer.startCalls[0].depth)
+	assert.Equal(t, 1, tracer.startCalls[0].depth, "the root sub-call renders one level under the depth-0 turn")
+	assert.Equal(t, uint64(1), tracer.startCalls[0].id, "the first sub-call is minted id 1")
 	require.Len(t, tracer.endCalls, 1)
+	assert.Equal(t, tracer.startCalls[0].id, tracer.endCalls[0].id, "the end shares its start's id")
 	assert.Equal(t, "child answer", tracer.endCalls[0].text, "QueryEnd carries the spliced result")
 }
 
@@ -165,11 +171,12 @@ func TestRecursiveSubSubCallBudgetExhaustedReturnsText(t *testing.T) {
 	tracer := new(recordingTracer)
 
 	sub := &recursiveSub{
-		budget:  budget,
-		tracer:  tracer,
-		rc:      RecursionContext{CurrentDepth: 0, MaxDepth: 3},
-		leaf:    failingLeaf(t),
-		descend: failingDescend(t),
+		queryIDs: new(atomic.Uint64),
+		budget:   budget,
+		tracer:   tracer,
+		rc:       RecursionContext{CurrentDepth: 0, MaxDepth: 3},
+		leaf:     failingLeaf(t),
+		descend:  failingDescend(t),
 	}
 
 	answer, err := sub.Sub("anything", "[evidence]")
@@ -189,11 +196,12 @@ func TestRecursiveSubDepthBudgetExhaustedReturnsText(t *testing.T) {
 	require.NoError(t, budget.EnterDepth())
 
 	sub := &recursiveSub{
-		budget:  budget,
-		tracer:  tracer,
-		rc:      RecursionContext{CurrentDepth: 0, MaxDepth: 1},
-		leaf:    failingLeaf(t),
-		descend: failingDescend(t),
+		queryIDs: new(atomic.Uint64),
+		budget:   budget,
+		tracer:   tracer,
+		rc:       RecursionContext{CurrentDepth: 0, MaxDepth: 1},
+		leaf:     failingLeaf(t),
+		descend:  failingDescend(t),
 	}
 
 	answer, err := sub.Sub("decompose", "[evidence]")
@@ -209,10 +217,11 @@ func TestRecursiveSubChildFailureReturnsText(t *testing.T) {
 	tracer := new(recordingTracer)
 
 	sub := &recursiveSub{
-		budget: budget,
-		tracer: tracer,
-		rc:     RecursionContext{CurrentDepth: 0, MaxDepth: 3},
-		leaf:   failingLeaf(t),
+		queryIDs: new(atomic.Uint64),
+		budget:   budget,
+		tracer:   tracer,
+		rc:       RecursionContext{CurrentDepth: 0, MaxDepth: 3},
+		leaf:     failingLeaf(t),
 		descend: func(RecursionContext, string, string) (string, error) {
 			return "", errors.New("child controller stalled")
 		},
@@ -237,17 +246,19 @@ func TestSharedBudgetCapsTwoLevelTreeNotPerChild(t *testing.T) {
 
 	// The leaf adapter stands in for the child controller's own agent.Query.
 	leaf := &recursiveSub{
-		budget:  budget,
-		tracer:  tracer,
-		rc:      RecursionContext{CurrentDepth: 1, MaxDepth: 1},
-		leaf:    func(prompt, evidence string) (string, error) { return leafSub.Answer(ctx, prompt, evidence) },
-		descend: failingDescend(t),
+		queryIDs: new(atomic.Uint64),
+		budget:   budget,
+		tracer:   tracer,
+		rc:       RecursionContext{CurrentDepth: 1, MaxDepth: 1},
+		leaf:     func(prompt, evidence string) (string, error) { return leafSub.Answer(ctx, prompt, evidence) },
+		descend:  failingDescend(t),
 	}
 	root := &recursiveSub{
-		budget: budget,
-		tracer: tracer,
-		rc:     RecursionContext{CurrentDepth: 0, MaxDepth: 1},
-		leaf:   failingLeaf(t),
+		queryIDs: new(atomic.Uint64),
+		budget:   budget,
+		tracer:   tracer,
+		rc:       RecursionContext{CurrentDepth: 0, MaxDepth: 1},
+		leaf:     failingLeaf(t),
 		descend: func(RecursionContext, string, string) (string, error) {
 			return leaf.Sub("leaf", "[x]")
 		},
@@ -273,19 +284,21 @@ func TestSharedBudgetCapFiresAcrossTwoLevelTree(t *testing.T) {
 	leafSub := new(mockLeafSub)
 
 	leaf := &recursiveSub{
-		budget: budget,
-		tracer: tracer,
-		rc:     RecursionContext{CurrentDepth: 1, MaxDepth: 1},
+		queryIDs: new(atomic.Uint64),
+		budget:   budget,
+		tracer:   tracer,
+		rc:       RecursionContext{CurrentDepth: 1, MaxDepth: 1},
 		leaf: func(prompt, evidence string) (string, error) {
 			return leafSub.Answer(context.Background(), prompt, evidence)
 		},
 		descend: failingDescend(t),
 	}
 	root := &recursiveSub{
-		budget: budget,
-		tracer: tracer,
-		rc:     RecursionContext{CurrentDepth: 0, MaxDepth: 1},
-		leaf:   failingLeaf(t),
+		queryIDs: new(atomic.Uint64),
+		budget:   budget,
+		tracer:   tracer,
+		rc:       RecursionContext{CurrentDepth: 0, MaxDepth: 1},
+		leaf:     failingLeaf(t),
 		descend: func(RecursionContext, string, string) (string, error) {
 			return leaf.Sub("leaf", "[x]")
 		},

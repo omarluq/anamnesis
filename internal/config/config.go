@@ -39,6 +39,9 @@ type AppConfig struct {
 type LoggingConfig struct {
 	Level  string `json:"level" mapstructure:"level" yaml:"level"`
 	Format string `json:"format" mapstructure:"format" yaml:"format"`
+	// File is the destination log file path. An empty value resolves to the XDG
+	// state default ($XDG_STATE_HOME/ana/ana.log) at logger construction.
+	File string `json:"file" mapstructure:"file" yaml:"file"`
 }
 
 // Validate ensures the configuration is internally consistent.
@@ -65,9 +68,4 @@ func (c *Config) Validate() error {
 	}
 
 	return nil
-}
-
-// IsDev reports whether the application is running in development mode.
-func (c *Config) IsDev() bool {
-	return c.App.Env == envDevelopment
 }

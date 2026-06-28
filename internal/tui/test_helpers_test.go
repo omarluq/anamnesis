@@ -11,56 +11,19 @@ import (
 const (
 	testAlpha = "alpha"
 	testBeta  = "beta"
-	testEnter = "enter"
-	testEsc   = "esc"
 	testHello = "hello"
-	testOne   = "one"
 )
 
-func testRect(x, y, width, height int) tui.Rect {
-	return tui.Rect{X: x, Y: y, Width: width, Height: height}
-}
-
-func testListItem(value, title, description, meta string) tui.ListItem {
-	return tui.ListItem{Value: value, Title: title, Description: description, Meta: meta}
+func testRect(y, width, height int) tui.Rect {
+	return tui.Rect{X: 0, Y: y, Width: width, Height: height}
 }
 
 func testTableCell(text string) tui.TableCell {
 	return tui.TableCell{Style: tcell.StyleDefault, Text: text}
 }
 
-func testTreeNode(text string, expanded, selected bool, children ...*tui.TreeNode) *tui.TreeNode {
-	return &tui.TreeNode{
-		Style:    tcell.StyleDefault,
-		Value:    text,
-		Text:     text,
-		Children: children,
-		Expanded: expanded,
-		Selected: selected,
-	}
-}
-
 func testLine(text string) tui.Line {
 	return tui.Line{Style: tcell.StyleDefault, Text: text, Spans: nil}
-}
-
-func listOptions(width, height int, hints tui.ListHints) *tui.ListRenderOptions {
-	return &tui.ListRenderOptions{Styles: emptyListStyles(), Hints: hints, Width: width, Height: height}
-}
-
-func emptyListHints() tui.ListHints {
-	return tui.ListHints{Up: "", Down: "", Confirm: "", Cancel: ""}
-}
-
-func emptyListStyles() tui.ListStyles {
-	return tui.ListStyles{
-		Border:   tcell.StyleDefault,
-		Accent:   tcell.StyleDefault,
-		Muted:    tcell.StyleDefault,
-		Text:     tcell.StyleDefault,
-		Selected: tcell.StyleDefault,
-		Dim:      tcell.StyleDefault,
-	}
 }
 
 func bufferLine(buffer *tui.CellBuffer, row int) string {
@@ -79,14 +42,6 @@ func lineTexts(lines []tui.Line) []string {
 	}
 
 	return texts
-}
-
-type rectRecorder struct {
-	rects []tui.Rect
-}
-
-func (recorder *rectRecorder) Draw(_ tui.ContentSetter, rect tui.Rect) {
-	recorder.rects = append(recorder.rects, rect)
 }
 
 type cellRecordingScreen struct {

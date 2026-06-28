@@ -12,6 +12,14 @@ const (
 	welcomeText = "Type a message and press Enter to begin."
 	// queryName labels every recursive sub-call block as the agent.Query primitive.
 	queryName = "agent.Query"
+	// judgeName labels the §16 judge-pass block as the agent.Judge gate.
+	judgeName = "agent.Judge"
+	// judgeArgs is the fixed args line shown on a judge block while the §16 gate
+	// reviews the resolved answer against its cited evidence.
+	judgeArgs = "reviewing answer against citations"
+	// judgeApprovedOutput is the output a judge block settles to when the §16 gate
+	// approves the answer (an empty critique); a non-empty critique replaces it.
+	judgeApprovedOutput = "approved — every claim is grounded in a cited entry"
 	// codeName labels every per-turn code-evaluation block as the Go the controller
 	// ran in the embedded interpreter.
 	codeName = "code"
@@ -23,17 +31,21 @@ const (
 // content. Query blocks (RoleToolResult) and per-turn code blocks
 // (RoleBashExecution) additionally carry their recursion Depth for indentation and a
 // Pending flag toggled between a start event (TraceKindQueryStart / TraceKindCodeStart)
-// and its matching end (TraceKindQueryEnd / TraceKindCodeEnd).
+// and its matching end (TraceKindQueryEnd / TraceKindCodeEnd). A query block also
+// carries the QueryID its start event minted, so completeQuery settles an end onto
+// its own start even when parallel fan-out completes out of order; non-query blocks
+// leave it 0.
 type chatMessage struct {
 	Role    transcript.Role
 	Content string
+	QueryID uint64
 	Depth   int
 	Pending bool
 }
 
 // newChatMessage builds a settled, top-level message of role carrying content.
 func newChatMessage(role transcript.Role, content string) chatMessage {
-	return chatMessage{Role: role, Content: content, Depth: 0, Pending: false}
+	return chatMessage{Role: role, Content: content, QueryID: 0, Depth: 0, Pending: false}
 }
 
 // appendUser appends the user's submitted prompt as a user message and returns
@@ -86,6 +98,7 @@ func (app *App) appendThinkingDelta(delta string) {
 	app.history = append(app.history, chatMessage{
 		Role:    transcript.RoleThinking,
 		Content: delta,
+		QueryID: 0,
 		Depth:   0,
 		Pending: true,
 	})
@@ -111,23 +124,28 @@ func (app *App) settleThinking(text string) {
 	app.history[last].Pending = false
 }
 
-// appendQueryStart opens a pending query block for a recursive agent.Query
-// sub-call carrying prompt at the given recursion depth.
-func (app *App) appendQueryStart(prompt string, depth int) {
+// appendQueryStart opens a pending query block for recursive agent.Query sub-call
+// queryID, carrying prompt at the given recursion depth. The id is stored so
+// completeQuery settles this block's own end rather than the newest pending block at
+// its depth.
+func (app *App) appendQueryStart(queryID uint64, prompt string, depth int) {
 	app.history = append(app.history, chatMessage{
 		Role:    transcript.RoleToolResult,
 		Content: queryContent(prompt, ""),
+		QueryID: queryID,
 		Depth:   depth,
 		Pending: true,
 	})
 }
 
-// completeQuery fills the most recent pending query block at depth with result,
-// settling it. A QueryEnd with no matching open block is ignored so a stray end
-// event cannot corrupt the transcript.
-func (app *App) completeQuery(result string, depth int) {
+// completeQuery fills the pending query block carrying queryID with result, settling
+// it. Matching by QueryID — not by depth and recency — pairs each end with its own
+// start even when parallel fan-out at one depth completes out of order; depth is kept
+// only for indentation. A QueryEnd with no matching open block is ignored so a stray
+// end event cannot corrupt the transcript.
+func (app *App) completeQuery(queryID uint64, result string) {
 	for index, message := range slices.Backward(app.history) {
-		if !message.Pending || message.Role != transcript.RoleToolResult || message.Depth != depth {
+		if !message.Pending || message.Role != transcript.RoleToolResult || message.QueryID != queryID {
 			continue
 		}
 
@@ -135,7 +153,8 @@ func (app *App) completeQuery(result string, depth int) {
 		app.history[index] = chatMessage{
 			Role:    transcript.RoleToolResult,
 			Content: queryContent(parsed.Args, result),
-			Depth:   depth,
+			QueryID: queryID,
+			Depth:   message.Depth,
 			Pending: false,
 		}
 
@@ -147,9 +166,23 @@ func (app *App) completeQuery(result string, depth int) {
 // tool-event wire format, reusing the shared transcript formatter so the on-screen
 // block and any persisted transcript stay in lockstep.
 func queryContent(prompt, result string) string {
+	return toolEventContent(queryName, prompt, result)
+}
+
+// judgeContent renders a judge block's args and verdict through the same tool-event
+// wire format as a query block, labeled as the agent.Judge gate.
+func judgeContent(args, result string) string {
+	return toolEventContent(judgeName, args, result)
+}
+
+// toolEventContent renders a named tool block's args and result into the
+// transcript's tool-event wire format, the shared formatter query and judge blocks
+// both round-trip through so the on-screen block and any persisted transcript stay
+// in lockstep.
+func toolEventContent(name, args, result string) string {
 	return transcript.FormatToolEventDisplay(&transcript.ToolEvent{
-		Name:          queryName,
-		ArgumentsJSON: prompt,
+		Name:          name,
+		ArgumentsJSON: args,
 		DetailsJSON:   "",
 		Result:        result,
 		Error:         "",
@@ -165,6 +198,7 @@ func (app *App) appendCodeStart(code string) {
 	app.history = append(app.history, chatMessage{
 		Role:    transcript.RoleBashExecution,
 		Content: codeContent(code, "", ""),
+		QueryID: 0,
 		Depth:   0,
 		Pending: true,
 	})
@@ -184,6 +218,54 @@ func (app *App) completeCode(output, errText string) {
 		app.history[index] = chatMessage{
 			Role:    transcript.RoleBashExecution,
 			Content: codeContent(parsed.Args, output, errText),
+			QueryID: 0,
+			Depth:   0,
+			Pending: false,
+		}
+
+		return
+	}
+}
+
+// appendJudgeStart opens a pending judge block for the §16 gate reviewing answer.
+// The block sits at depth 0 with a fixed args line; completeJudge later settles it
+// with the verdict. The answer under review frames the gate but is not itself shown
+// in the block, which previews the review action rather than the full answer text.
+func (app *App) appendJudgeStart(_ string) {
+	app.history = append(app.history, chatMessage{
+		Role:    transcript.RoleToolResult,
+		Content: judgeContent(judgeArgs, ""),
+		QueryID: 0,
+		Depth:   0,
+		Pending: true,
+	})
+}
+
+// completeJudge settles the most recent pending judge block with the gate's verdict:
+// the standing approved line when critique is empty, or the critique text when the
+// gate asks for a revision. A JudgeEnd with no open judge block is ignored so a
+// stray end cannot corrupt the transcript. Judge blocks carry no QueryID — there is
+// at most one pending at a time — so the most-recent pending agent.Judge block is
+// the match.
+func (app *App) completeJudge(critique string) {
+	output := judgeApprovedOutput
+	if critique != "" {
+		output = critique
+	}
+
+	for index, message := range slices.Backward(app.history) {
+		if !message.Pending || message.Role != transcript.RoleToolResult {
+			continue
+		}
+
+		if parseQueryContent(message.Content).Name != judgeName {
+			continue
+		}
+
+		app.history[index] = chatMessage{
+			Role:    transcript.RoleToolResult,
+			Content: judgeContent(judgeArgs, output),
+			QueryID: 0,
 			Depth:   0,
 			Pending: false,
 		}

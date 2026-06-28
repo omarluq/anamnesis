@@ -31,8 +31,6 @@ func TestLineStyledOperationsPreserveSpans(t *testing.T) {
 	require.Equal(t, green, truncated.Spans[1].Style)
 
 	require.Equal(t, []string{testHello, "world"}, lineTexts(line.Wrap(6)))
-	require.Equal(t, []string{"hello ", "world"}, lineTexts(line.WrapPreserveWhitespace(6)))
-	require.Equal(t, []string{testHello, " worl", "d"}, lineTexts(line.WrapCells(5)))
 
 	prefixed := line.WithPrefix("› ", red)
 	require.Equal(t, "› hello world", prefixed.Text)
@@ -45,9 +43,7 @@ func TestLinePlainTextAndEdgeCases(t *testing.T) {
 
 	plain := tui.NewLine(tcell.StyleDefault, testAlpha+" "+testBeta)
 	require.Equal(t, []string{testAlpha, testBeta}, lineTexts(plain.Wrap(6)))
-	require.Equal(t, []string{testAlpha + " ", testBeta}, lineTexts(plain.WrapPreserveWhitespace(6)))
 	require.Equal(t, []string{""}, lineTexts(plain.Wrap(0)))
-	require.Equal(t, []string{""}, lineTexts(plain.WrapCells(0)))
 
 	wide := tui.NewLine(tcell.StyleDefault, "語x")
 	require.Equal(t, "…", wide.Truncate(1).Text)
@@ -75,12 +71,4 @@ func TestLineHelpers(t *testing.T) {
 	)
 	require.Equal(t, []tui.Line{}, tui.Tail([]tui.Line{testLine("a")}, 0))
 	require.Equal(t, []tui.Line{testLine("a")}, tui.Tail([]tui.Line{testLine("a")}, 5))
-}
-
-func TestWrapLines(t *testing.T) {
-	t.Parallel()
-
-	lines := []tui.Line{tui.NewLine(tcell.StyleDefault, testAlpha+" "+testBeta)}
-	require.Equal(t, []string{testAlpha, testBeta}, lineTexts(tui.WrapLines(lines, 6)))
-	require.Empty(t, tui.WrapLines(lines, 0))
 }

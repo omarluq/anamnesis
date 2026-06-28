@@ -2,7 +2,6 @@ package tui
 
 import (
 	"strings"
-	"unicode"
 
 	"github.com/gdamore/tcell/v3"
 )
@@ -34,15 +33,6 @@ func (area *TextArea) TextValue() string {
 	}
 
 	return area.Text
-}
-
-// CursorValue returns the current rune cursor position.
-func (area *TextArea) CursorValue() int {
-	if area == nil {
-		return 0
-	}
-
-	return area.Cursor
 }
 
 // Empty reports whether the text is empty.
@@ -105,43 +95,8 @@ func (area *TextArea) MoveRight() {
 	area.Update(func(value []rune, cursor int) ([]rune, int) { return value, MoveCursorRight(value, cursor) })
 }
 
-// MoveWordLeft moves the cursor to the beginning of the previous word.
-func (area *TextArea) MoveWordLeft() {
-	area.Update(func(value []rune, cursor int) ([]rune, int) { return value, WordLeft(value, cursor) })
-}
-
-// MoveWordRight moves the cursor to the end of the next word.
-func (area *TextArea) MoveWordRight() {
-	area.Update(func(value []rune, cursor int) ([]rune, int) { return value, WordRight(value, cursor) })
-}
-
-// MoveLineStart moves the cursor to the start of the current line.
-func (area *TextArea) MoveLineStart() {
-	area.Update(func(value []rune, cursor int) ([]rune, int) { return value, CurrentLineStart(value, cursor) })
-}
-
-// MoveLineEnd moves the cursor to the end of the current line.
-func (area *TextArea) MoveLineEnd() {
-	area.Update(func(value []rune, cursor int) ([]rune, int) { return value, CurrentLineEnd(value, cursor) })
-}
-
 // DeleteBackward deletes one rune before the cursor.
 func (area *TextArea) DeleteBackward() { area.Update(DeleteBackwardAt) }
-
-// DeleteForward deletes one rune at the cursor.
-func (area *TextArea) DeleteForward() { area.Update(DeleteForwardAt) }
-
-// DeleteWordBackward deletes the previous word.
-func (area *TextArea) DeleteWordBackward() { area.Update(DeleteWordBackwardAt) }
-
-// DeleteWordForward deletes the next word.
-func (area *TextArea) DeleteWordForward() { area.Update(DeleteWordForwardAt) }
-
-// DeleteToLineStart deletes from the cursor to the start of the current line.
-func (area *TextArea) DeleteToLineStart() { area.Update(DeleteToLineStartAt) }
-
-// DeleteToLineEnd deletes from the cursor to the end of the current line.
-func (area *TextArea) DeleteToLineEnd() { area.Update(DeleteToLineEndAt) }
 
 // TextAreaRender describes rendered editor lines and cursor position.
 type TextAreaRender struct {
@@ -252,16 +207,6 @@ func Chars(value []rune) []string {
 	return chars
 }
 
-// StringChars converts text into string cells.
-func StringChars(text string) []string {
-	chars := make([]string, 0, len([]rune(text)))
-	for _, char := range text {
-		chars = append(chars, string(char))
-	}
-
-	return chars
-}
-
 // ClampCursor clamps a rune cursor to the text length.
 func ClampCursor(cursor, runeCount int) int {
 	if cursor < 0 {
@@ -320,109 +265,4 @@ func DeleteBackwardAt(value []rune, cursor int) (next []rune, nextCursor int) {
 	next = append(next, value[cursor:]...)
 
 	return next, cursor - 1
-}
-
-// DeleteForwardAt deletes the rune at cursor.
-func DeleteForwardAt(value []rune, cursor int) (next []rune, nextCursor int) {
-	cursor = ClampCursor(cursor, len(value))
-	if cursor >= len(value) {
-		return value, cursor
-	}
-
-	next = append([]rune{}, value[:cursor]...)
-	next = append(next, value[cursor+1:]...)
-
-	return next, cursor
-}
-
-// DeleteWordBackwardAt deletes from cursor to the previous word boundary.
-func DeleteWordBackwardAt(value []rune, cursor int) (next []rune, nextCursor int) {
-	cursor = ClampCursor(cursor, len(value))
-	start := WordLeft(value, cursor)
-	next = append([]rune{}, value[:start]...)
-	next = append(next, value[cursor:]...)
-
-	return next, start
-}
-
-// DeleteWordForwardAt deletes from cursor to the next word boundary.
-func DeleteWordForwardAt(value []rune, cursor int) (next []rune, nextCursor int) {
-	cursor = ClampCursor(cursor, len(value))
-	end := WordRight(value, cursor)
-	next = append([]rune{}, value[:cursor]...)
-	next = append(next, value[end:]...)
-
-	return next, cursor
-}
-
-// DeleteToLineStartAt deletes from cursor to the current line start.
-func DeleteToLineStartAt(value []rune, cursor int) (next []rune, nextCursor int) {
-	cursor = ClampCursor(cursor, len(value))
-	start := CurrentLineStart(value, cursor)
-	next = append([]rune{}, value[:start]...)
-	next = append(next, value[cursor:]...)
-
-	return next, start
-}
-
-// DeleteToLineEndAt deletes from cursor to the current line end.
-func DeleteToLineEndAt(value []rune, cursor int) (next []rune, nextCursor int) {
-	cursor = ClampCursor(cursor, len(value))
-	end := CurrentLineEnd(value, cursor)
-	next = append([]rune{}, value[:cursor]...)
-	next = append(next, value[end:]...)
-
-	return next, cursor
-}
-
-// CurrentLineStart returns the rune index of the current line start.
-func CurrentLineStart(value []rune, cursor int) int {
-	cursor = ClampCursor(cursor, len(value))
-	for index := cursor - 1; index >= 0; index-- {
-		if value[index] == '\n' {
-			return index + 1
-		}
-	}
-
-	return 0
-}
-
-// CurrentLineEnd returns the rune index of the current line end.
-func CurrentLineEnd(value []rune, cursor int) int {
-	cursor = ClampCursor(cursor, len(value))
-	for index := cursor; index < len(value); index++ {
-		if value[index] == '\n' {
-			return index
-		}
-	}
-
-	return len(value)
-}
-
-// WordLeft returns the rune index at the beginning of the previous word.
-func WordLeft(value []rune, cursor int) int {
-	index := max(0, ClampCursor(cursor, len(value)))
-	for index > 0 && unicode.IsSpace(value[index-1]) {
-		index--
-	}
-
-	for index > 0 && !unicode.IsSpace(value[index-1]) {
-		index--
-	}
-
-	return index
-}
-
-// WordRight returns the rune index at the end of the next word.
-func WordRight(value []rune, cursor int) int {
-	index := min(max(0, cursor), len(value))
-	for index < len(value) && unicode.IsSpace(value[index]) {
-		index++
-	}
-
-	for index < len(value) && !unicode.IsSpace(value[index]) {
-		index++
-	}
-
-	return index
 }

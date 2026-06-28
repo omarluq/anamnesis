@@ -63,11 +63,12 @@ func (adapter *rlmController) run(ctx context.Context, query string, runID uint6
 // of blocking forever on a reader that has gone away.
 func (adapter *rlmController) emitFailure(ctx context.Context, out chan<- TraceEvent, runID uint64, cause error) {
 	event := TraceEvent{
-		Kind:  TraceKindFinal,
-		Text:  "investigation failed: " + cause.Error(),
-		Err:   "",
-		Depth: 0,
-		RunID: runID,
+		Kind:    TraceKindFinal,
+		Text:    "investigation failed: " + cause.Error(),
+		Err:     "",
+		Depth:   0,
+		RunID:   runID,
+		QueryID: 0,
 	}
 
 	select {

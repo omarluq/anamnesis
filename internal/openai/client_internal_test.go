@@ -71,7 +71,6 @@ func TestNewClientSucceedsWithAPIKey(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, client)
-	assert.NotNil(t, client.API())
 }
 
 func TestNewClientRequestCarriesBearerKeyAndBaseURL(t *testing.T) {
@@ -93,7 +92,7 @@ func TestNewClientRequestCarriesBearerKeyAndBaseURL(t *testing.T) {
 
 	var out map[string]any
 
-	err = client.API().Get(context.Background(), "models", nil, &out)
+	err = client.api.Get(context.Background(), "models", nil, &out)
 	require.NoError(t, err)
 
 	req := transport.last()
@@ -122,7 +121,7 @@ func TestNewClientBaseURLOverrideBeatsAmbientDefault(t *testing.T) {
 
 	var out map[string]any
 
-	err = client.API().Get(context.Background(), "models", nil, &out)
+	err = client.api.Get(context.Background(), "models", nil, &out)
 	require.NoError(t, err)
 
 	req := transport.last()

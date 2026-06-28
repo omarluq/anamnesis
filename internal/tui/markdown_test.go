@@ -62,7 +62,7 @@ func TestMarkdownViewRendersCommonBlocks(t *testing.T) {
 	require.Contains(t, text, "Alpha")
 
 	buffer := tui.NewCellBuffer(40, 2, tcell.StyleDefault)
-	(&tui.MarkdownView{Text: "# Heading", Styles: styles, Engine: nil, Lexer: nil}).Draw(buffer, testRect(0, 0, 40, 2))
+	(&tui.MarkdownView{Text: "# Heading", Styles: styles, Engine: nil, Lexer: nil}).Draw(buffer, testRect(0, 40, 2))
 	require.Equal(t, '#', buffer.Cell(1, 0).Rune)
 }
 

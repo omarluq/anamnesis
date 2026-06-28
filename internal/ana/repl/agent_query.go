@@ -267,7 +267,7 @@ func (runner *queryRunner) fail(err error) {
 }
 
 // report writes notice as a line to the interpreter's stdout buffer, the same
-// buffer interpreted fmt.Print output is captured into. The bytes.Buffer write
+// locked buffer interpreted fmt.Print output is captured into. The buffer write
 // cannot fail; the error is handled only to satisfy the linter and would itself
 // surface through Eval if it ever did.
 func (runner *queryRunner) report(notice string) {

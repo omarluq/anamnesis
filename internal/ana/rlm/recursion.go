@@ -2,6 +2,7 @@ package rlm
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/samber/oops"
 
@@ -46,15 +47,17 @@ func (rc RecursionContext) CanRecurse() bool {
 }
 
 // QueryTracer observes the lifecycle of one recursive agent.Query sub-call so the
-// terminal layer can render it as a depth-indented query block. The rlm package
-// owns this narrow seam and defaults to a no-op, so the recursion core never
-// depends on the terminal or emitter package; Branch 2's *Emitter satisfies it
-// structurally through its QueryStart and QueryEnd methods, wired in at run.go.
+// terminal layer can render it as a depth-indented query block. Every sub-call is
+// minted a unique id the start and end share, so the renderer pairs an end with its
+// own start even when parallel fan-out completes out of order. The rlm package owns
+// this narrow seam and defaults to a no-op, so the recursion core never depends on
+// the terminal or emitter package; the *Emitter satisfies it structurally through
+// its QueryStart and QueryEnd methods, wired in at run.go.
 type QueryTracer interface {
-	// QueryStart marks the start of a sub-call carrying prompt at nesting depth.
-	QueryStart(prompt string, depth int)
-	// QueryEnd marks the completion of a sub-call carrying result at nesting depth.
-	QueryEnd(result string, depth int)
+	// QueryStart marks the start of sub-call queryID carrying prompt at nesting depth.
+	QueryStart(queryID uint64, prompt string, depth int)
+	// QueryEnd marks the completion of sub-call queryID carrying result at depth.
+	QueryEnd(queryID uint64, result string, depth int)
 }
 
 // noopQueryTracer is the default QueryTracer the recursion core runs under until a
@@ -63,10 +66,10 @@ type QueryTracer interface {
 type noopQueryTracer struct{}
 
 // QueryStart drops the start event.
-func (noopQueryTracer) QueryStart(_ string, _ int) {}
+func (noopQueryTracer) QueryStart(_ uint64, _ string, _ int) {}
 
 // QueryEnd drops the end event.
-func (noopQueryTracer) QueryEnd(_ string, _ int) {}
+func (noopQueryTracer) QueryEnd(_ uint64, _ string, _ int) {}
 
 // recursiveSub is the recursive sub-call adapter bound to one node of the
 // investigation tree; it satisfies the repl.SubLLM seam agent.Query and
@@ -79,6 +82,10 @@ func (noopQueryTracer) QueryEnd(_ string, _ int) {}
 type recursiveSub struct {
 	// budget is the shared, tree-wide §6 budget every node in the tree charges.
 	budget *Budget
+	// queryIDs mints a unique id per sub-call, shared tree-wide so every sub-call —
+	// including the concurrent fan-out QueryBatched drives through this one adapter —
+	// gets a distinct id the tracer can pair its start and end on.
+	queryIDs *atomic.Uint64
 	// tracer observes this sub-call's start and end for the terminal layer.
 	tracer QueryTracer
 	// leaf makes the flat base-case sub-LLM call the leaf level falls back to.
@@ -92,17 +99,23 @@ type recursiveSub struct {
 // Compile-time assertion that the adapter satisfies the repl sub-call seam.
 var _ repl.SubLLM = (*recursiveSub)(nil)
 
-// Sub answers one agent.Query sub-call: it brackets the work with the tracer's
-// start and end events at this node's depth, then resolves the answer through the
-// flat base case or a child controller loop. The returned error is non-nil only
-// for a leaf base-case failure, which the interpreter surfaces as a turn error;
-// budget breaches and child-loop failures come back as text with a nil error.
+// Sub answers one agent.Query sub-call: it mints a unique id, brackets the work
+// with the tracer's start and end events sharing that id, then resolves the answer
+// through the flat base case or a child controller loop. The events are stamped at
+// CurrentDepth+1: the root node runs at depth 0, so its sub-calls render indented
+// one level under their turn rather than flush with the code block. The returned
+// error is non-nil only for a leaf base-case failure, which the interpreter
+// surfaces as a turn error; budget breaches and child-loop failures come back as
+// text with a nil error.
 func (s *recursiveSub) Sub(prompt, evidence string) (string, error) {
-	s.tracer.QueryStart(prompt, s.rc.CurrentDepth)
+	queryID := s.queryIDs.Add(1)
+	depth := s.rc.CurrentDepth + 1
+
+	s.tracer.QueryStart(queryID, prompt, depth)
 
 	result, err := s.resolve(prompt, evidence)
 
-	s.tracer.QueryEnd(result, s.rc.CurrentDepth)
+	s.tracer.QueryEnd(queryID, result, depth)
 
 	return result, err
 }
@@ -165,18 +178,22 @@ type recursor struct {
 	emitter *Emitter
 	// tracer observes every sub-call's lifecycle for the terminal layer.
 	tracer QueryTracer
+	// queryIDs mints a tree-wide unique id per sub-call, shared into every node's
+	// adapter so ids never collide across levels or across concurrent fan-out.
+	queryIDs *atomic.Uint64
 }
 
 // newRecursor binds the collaborators every node of one investigation tree reuses
 // into the factory that builds its interpreters, adapters, and child loops. A nil
 // tracer defaults to the no-op, so the recursion core runs with no terminal
-// attached without the caller wiring a tracer.
+// attached without the caller wiring a tracer. The fresh query-id counter is shared
+// across every adapter the factory builds, so sub-call ids are unique tree-wide.
 func newRecursor(deps *Deps, budget *Budget, emitter *Emitter, tracer QueryTracer) *recursor {
 	if tracer == nil {
 		tracer = noopQueryTracer{}
 	}
 
-	return &recursor{deps: deps, budget: budget, emitter: emitter, tracer: tracer}
+	return &recursor{deps: deps, budget: budget, emitter: emitter, tracer: tracer, queryIDs: new(atomic.Uint64)}
 }
 
 // interpreter assembles the mvm REPL session a controller at rc drives: the
@@ -222,9 +239,10 @@ func (r *recursor) interpreter(
 // closures keeps it off the recursor and adapter structs.
 func (r *recursor) subFor(ctx context.Context, node RecursionContext) *recursiveSub {
 	return &recursiveSub{
-		budget: r.budget,
-		tracer: r.tracer,
-		rc:     node,
+		budget:   r.budget,
+		queryIDs: r.queryIDs,
+		tracer:   r.tracer,
+		rc:       node,
 		leaf: func(prompt, evidence string) (string, error) {
 			return r.deps.Sub.Answer(ctx, prompt, evidence)
 		},

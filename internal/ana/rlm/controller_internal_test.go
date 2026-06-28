@@ -95,7 +95,6 @@ func TestCodeOutputJoinsStdoutThenRetval(t *testing.T) {
 	result := repl.Result{
 		Retval: reflect.ValueOf(42),
 		Stdout: "scanning boots\n",
-		Stderr: "",
 	}
 
 	assert.Equal(t, "scanning boots\n42", codeOutput(result))
@@ -109,10 +108,9 @@ func TestCodeOutputOmitsEmptySections(t *testing.T) {
 	result := repl.Result{
 		Retval: reflect.Value{},
 		Stdout: "only stdout\n",
-		Stderr: "",
 	}
 
 	assert.Equal(t, "only stdout", codeOutput(result))
-	assert.Empty(t, codeOutput(repl.Result{Retval: reflect.Value{}, Stdout: "", Stderr: ""}),
+	assert.Empty(t, codeOutput(repl.Result{Retval: reflect.Value{}, Stdout: ""}),
 		"a turn that printed nothing and returned nothing renders an empty block")
 }

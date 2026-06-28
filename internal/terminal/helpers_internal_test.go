@@ -194,11 +194,12 @@ func runeKey(text string) *tcell.EventKey {
 // readable.
 func traceEvent(kind TraceKind, text string, runID uint64) TraceEvent {
 	return TraceEvent{
-		Kind:  kind,
-		Text:  text,
-		Err:   "",
-		Depth: 0,
-		RunID: runID,
+		Kind:    kind,
+		Text:    text,
+		Err:     "",
+		Depth:   0,
+		RunID:   runID,
+		QueryID: 0,
 	}
 }
 
@@ -206,11 +207,12 @@ func traceEvent(kind TraceKind, text string, runID uint64) TraceEvent {
 // assertions bind the rendered prefix to the event's Depth.
 func traceDepthEvent(kind TraceKind, text string, depth int) TraceEvent {
 	return TraceEvent{
-		Kind:  kind,
-		Text:  text,
-		Err:   "",
-		Depth: depth,
-		RunID: 0,
+		Kind:    kind,
+		Text:    text,
+		Err:     "",
+		Depth:   depth,
+		RunID:   0,
+		QueryID: 0,
 	}
 }
 
@@ -259,12 +261,22 @@ func ctrlKey(key string) *tcell.EventKey {
 	return tcell.NewEventKey(tcell.KeyRune, key, tcell.ModNone)
 }
 
-// transcriptText renders the full transcript at width and joins every line's text,
-// so assertions can scan the rendered conversation as a single string.
+// transcriptText renders the full transcript at width and joins every line's visible
+// text, so assertions can scan the rendered conversation as a single string. A line
+// carries its text either in Text or, once syntax-highlighted/styled, split across
+// Spans — concatenate the spans so highlighted output is not invisible to asserts.
 func transcriptText(app *App, width int) string {
 	var builder strings.Builder
+
 	for _, line := range app.transcriptLines(width) {
-		builder.WriteString(line.Text)
+		if len(line.Spans) == 0 {
+			builder.WriteString(line.Text)
+		} else {
+			for _, span := range line.Spans {
+				builder.WriteString(span.Text)
+			}
+		}
+
 		builder.WriteByte('\n')
 	}
 

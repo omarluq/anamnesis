@@ -1,8 +1,10 @@
 package repl_test
 
 import (
+	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/samber/oops"
 	"github.com/stretchr/testify/assert"
@@ -46,7 +48,9 @@ func TestInterpreterRedeclareAcrossEval(t *testing.T) {
 	require.NoError(t, err)
 
 	_, redeclareErr := interpreter.Eval("turn_1", "n := 2")
-	t.Logf("redeclare a persisted var with := across Eval → err=%v", redeclareErr)
+	require.NoError(t, redeclareErr,
+		"mvm tolerates redeclaring a persisted top-level var with := across Eval — it does not raise Go's "+
+			"\"no new variables on the left side of :=\", so the prompt need not forbid re-declaration")
 
 	reassigned, err := interpreter.Eval("turn_2", "n = 3\nn")
 	require.NoError(t, err, "reassigning a persisted var with = must work across turns")
@@ -70,4 +74,51 @@ func TestInterpreterEvalWrapsError(t *testing.T) {
 	require.ErrorAs(t, err, &oopsErr)
 	assert.Equal(t, "repl", oopsErr.Domain())
 	assert.Equal(t, "eval_failed", oopsErr.Code())
+}
+
+// TestEvalContextReturnsForFastCode proves EvalContext runs ordinary code to
+// completion under a generous timeout, returning its captured stdout and the final
+// expression's value exactly as the synchronous Eval would.
+func TestEvalContextReturnsForFastCode(t *testing.T) {
+	t.Parallel()
+
+	interpreter := repl.NewInterpreter()
+
+	result, err := interpreter.EvalContext(
+		context.Background(),
+		time.Second,
+		"fast",
+		`fmt.Println("done"); 21 * 2`,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "done\n", result.Stdout)
+	require.True(t, result.Retval.IsValid())
+	assert.Equal(t, int64(42), result.Retval.Int())
+}
+
+// TestEvalContextTimesOutOnNonTerminatingLoop proves a turn whose generated Go never
+// returns is bounded by the per-eval timeout rather than hanging the caller:
+// EvalContext returns promptly with an eval_timed_out error and the best-effort
+// partial stdout printed before the loop wedged. The test must not hang — that
+// promptness is the property under test — so the tiny timeout is the whole point.
+func TestEvalContextTimesOutOnNonTerminatingLoop(t *testing.T) {
+	t.Parallel()
+
+	interpreter := repl.NewInterpreter()
+
+	result, err := interpreter.EvalContext(
+		context.Background(),
+		50*time.Millisecond,
+		"wedged",
+		`fmt.Print("seen"); for {}`,
+	)
+	require.Error(t, err)
+
+	var oopsErr oops.OopsError
+
+	require.ErrorAs(t, err, &oopsErr)
+	assert.Equal(t, "repl", oopsErr.Domain())
+	assert.Equal(t, "eval_timed_out", oopsErr.Code())
+	assert.Equal(t, "seen", result.Stdout, "partial stdout printed before the loop wedged is captured")
+	assert.False(t, result.Retval.IsValid(), "a timed-out eval resolves no value")
 }

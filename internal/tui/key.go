@@ -2,7 +2,6 @@ package tui
 
 import (
 	"strings"
-	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v3"
 )
@@ -16,17 +15,6 @@ type KeyEvent struct {
 	Ctrl  bool
 	Alt   bool
 	Shift bool
-}
-
-// EventRune returns the first rune carried by a tcell rune key event.
-func EventRune(event *tcell.EventKey) rune {
-	if event == nil || event.Str() == "" {
-		return 0
-	}
-
-	value, _ := utf8.DecodeRuneInString(event.Str())
-
-	return value
 }
 
 // NewKeyEvent converts a tcell/v3 key event into a normalized key event.

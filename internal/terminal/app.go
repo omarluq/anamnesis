@@ -52,20 +52,21 @@ type RunOptions struct {
 // App is the mutable shell state owned by the single loop goroutine.
 type App struct {
 	screen     tcell.Screen
-	renderer   *tui.Renderer
 	controller Controller
+	renderer   *tui.Renderer
 	cancel     context.CancelFunc
 	traceCh    <-chan TraceEvent
 	title      string
 	history    []chatMessage
 	composer   tui.TextArea
-	theme      Theme
 
+	spinnerFrame int
 	caretColumn  int
 	caretRow     int
 	runID        uint64
-	spinnerFrame int
 	scroll       int // Lines lifted above the bottom; 0 pins the transcript to the tail.
+
+	theme Theme
 
 	caretVisible  bool
 	toolsExpanded bool
@@ -183,10 +184,11 @@ func (app *App) handleTrace(event TraceEvent, ok bool) {
 }
 
 // applyTrace translates a trace event into a transcript mutation: thinking deltas
-// stream into a live thinking block and the final thinking settles it; code starts
-// and query starts mark the loop busy and append their blocks; a code end and a
-// query end complete their pending blocks; and a final answer clears the busy state
-// and appends the assistant markdown.
+// stream into a live thinking block and the final thinking settles it; code starts,
+// query starts, and the judge start mark the loop busy and append their blocks; a
+// code end, a query end (matched to its start by QueryID), and the judge end
+// complete their pending blocks; and a final answer clears the busy state and
+// appends the assistant markdown.
 func (app *App) applyTrace(event TraceEvent) {
 	switch event.Kind {
 	case TraceKindThinkingDelta:
@@ -206,9 +208,15 @@ func (app *App) applyTrace(event TraceEvent) {
 	case TraceKindQueryStart:
 		app.working = true
 
-		app.appendQueryStart(event.Text, event.Depth)
+		app.appendQueryStart(event.QueryID, event.Text, event.Depth)
 	case TraceKindQueryEnd:
-		app.completeQuery(event.Text, event.Depth)
+		app.completeQuery(event.QueryID, event.Text)
+	case TraceKindJudgeStart:
+		app.working = true
+
+		app.appendJudgeStart(event.Text)
+	case TraceKindJudgeEnd:
+		app.completeJudge(event.Text)
 	case TraceKindFinal:
 		app.working = false
 

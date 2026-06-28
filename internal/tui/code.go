@@ -22,75 +22,6 @@ type CodeTheme struct {
 	DiffDel tcell.Color
 }
 
-// CodeBlock renders syntax-highlighted code.
-type CodeBlock struct {
-	Style    tcell.Style
-	Engine   *LexerEngine
-	Language string
-	Text     string
-	Theme    CodeTheme
-}
-
-// Render returns highlighted code lines.
-func (block *CodeBlock) Render(width, height int) []Line {
-	if block == nil || width <= 0 || height <= 0 {
-		return []Line{}
-	}
-
-	rendered := newLexerCodeRenderer(block.Engine).render(block.Language, block.Text, block.Theme, block.Style)
-	lines := WrapCodeLines(rendered, width)
-
-	return Tail(lines, height)
-}
-
-// Draw draws highlighted code.
-func (block *CodeBlock) Draw(screen ContentSetter, rect Rect) {
-	DrawLines(screen, rect, block.Render(rect.Width, rect.Height))
-}
-
-// DiffView renders diff lines with add/delete coloring.
-type DiffView struct {
-	Style tcell.Style
-	Text  string
-	Theme CodeTheme
-}
-
-// Render returns diff lines.
-func (view *DiffView) Render(width, height int) []Line {
-	if view == nil || width <= 0 || height <= 0 {
-		return []Line{}
-	}
-
-	styled := DiffStyledLines(view.Text, view.Theme, view.Style)
-	wrapped := WrapCodeLines(styled, width)
-
-	return Tail(wrapped, height)
-}
-
-// Draw draws diff lines.
-func (view *DiffView) Draw(screen ContentSetter, rect Rect) {
-	DrawLines(screen, rect, view.Render(rect.Width, rect.Height))
-}
-
-// SyntaxHighlightedCodeLines returns syntax-highlighted code lines.
-func SyntaxHighlightedCodeLines(language, text string, theme CodeTheme, baseStyle tcell.Style) []Line {
-	return newLexerCodeRenderer(nil).render(language, text, theme, baseStyle)
-}
-
-// PrefixLines prepends prefix to each rich line while preserving existing span styles.
-func PrefixLines(lines []Line, prefix string, prefixStyle tcell.Style) []Line {
-	if prefix == "" || len(lines) == 0 {
-		return lines
-	}
-
-	prefixed := make([]Line, 0, len(lines))
-	for _, line := range lines {
-		prefixed = append(prefixed, line.WithPrefix(prefix, prefixStyle))
-	}
-
-	return prefixed
-}
-
 // lexerCodeRenderer owns a cache-backed lexer engine and renders
 // syntax-highlighted code lines for code blocks.
 type lexerCodeRenderer struct {
@@ -170,28 +101,6 @@ func codeStyledLines(text string, baseStyle tcell.Style) []Line {
 	lines := make([]Line, 0, len(parts))
 	for _, part := range parts {
 		lines = append(lines, NewLine(baseStyle, part))
-	}
-
-	return lines
-}
-
-// DiffStyledLines returns styled diff lines.
-func DiffStyledLines(text string, theme CodeTheme, baseStyle tcell.Style) []Line {
-	parts := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
-	if len(parts) == 0 {
-		return nil
-	}
-
-	lines := make([]Line, 0, len(parts))
-	for _, part := range parts {
-		style := baseStyle
-		if strings.HasPrefix(part, "+") {
-			style = baseStyle.Foreground(theme.DiffAdd)
-		} else if strings.HasPrefix(part, "-") {
-			style = baseStyle.Foreground(theme.DiffDel)
-		}
-
-		lines = append(lines, NewLine(style, part))
 	}
 
 	return lines
@@ -280,11 +189,6 @@ func styleForToken(tokenType chroma.TokenType, theme CodeTheme, baseStyle tcell.
 	return baseStyle.Foreground(theme.Warning)
 }
 
-// WrapLines wraps rich lines to width cells, trimming wrapping whitespace.
-func WrapLines(lines []Line, width int) []Line {
-	return wrapLinesWithMode(lines, width, false)
-}
-
 // WrapCodeLines wraps code-like rich lines without letting indentation hide content.
 func WrapCodeLines(lines []Line, width int) []Line {
 	if width <= 0 {
@@ -350,26 +254,6 @@ func appendCodeIndent(segments []styledSegment, width int, style tcell.Style) []
 	indented = append(indented, styledSegment{Text: strings.Repeat(" ", width), Width: width, Style: style})
 
 	return append(indented, segments...)
-}
-
-func wrapLinesWithMode(lines []Line, width int, preserveWhitespace bool) []Line {
-	if width <= 0 {
-		return []Line{}
-	}
-
-	wrapped := []Line{}
-
-	for _, line := range lines {
-		if preserveWhitespace {
-			wrapped = append(wrapped, line.WrapPreserveWhitespace(width)...)
-
-			continue
-		}
-
-		wrapped = append(wrapped, line.Wrap(width)...)
-	}
-
-	return wrapped
 }
 
 func codeNameColor(tokenType chroma.TokenType, theme CodeTheme) tcell.Color {

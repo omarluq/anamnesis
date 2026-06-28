@@ -20,6 +20,16 @@ const (
 	// so this is sized at 30 minutes. The 30-turn and 60-sub-call budgets are the real
 	// bound, with this as the outer cap that prevents a wedged run from hanging forever.
 	defaultWallTimeout = 1800 * time.Second
+	// defaultPerEvalTimeout bounds a single controller eval — the model-generated Go
+	// run synchronously through the mvm interpreter, which has no preemption of its
+	// own, so a model-emitted non-terminating loop would otherwise wedge the eval
+	// goroutine forever (the wall-clock ctx cannot interrupt a loop that never checks
+	// it). 10 minutes is deliberately generous: a legitimately slow turn is slow
+	// because of ctx-honoring network sub-calls (a max-effort controller model,
+	// unbounded output, an 8-wide QueryBatched fan-out each possibly a child loop), so
+	// 10 minutes clears real work; a wedged loop does zero I/O, so the timeout caps it.
+	// EvalContext still selects on ctx.Done, so defaultWallTimeout stays the outer bound.
+	defaultPerEvalTimeout = 600 * time.Second
 )
 
 // Distinct budget sentinels; each carries its own machine-readable oops code.
@@ -35,6 +45,10 @@ var (
 type Budget struct {
 	// WallTimeout bounds the wall-clock time for a whole session.
 	WallTimeout time.Duration
+	// PerEvalTimeout bounds a single eval of model-generated Go, so a non-terminating
+	// loop the interpreter cannot preempt is force-finished rather than hanging the
+	// session forever. See defaultPerEvalTimeout.
+	PerEvalTimeout time.Duration
 	// MaxTurns bounds the number of controller turns per session.
 	MaxTurns int
 	// MaxDepth bounds the agent.Query recursion depth.
@@ -50,6 +64,7 @@ type Budget struct {
 func NewBudget() *Budget {
 	budget := new(Budget)
 	budget.WallTimeout = defaultWallTimeout
+	budget.PerEvalTimeout = defaultPerEvalTimeout
 	budget.MaxTurns = defaultMaxTurns
 	budget.MaxDepth = defaultMaxDepth
 	budget.MaxSubCalls = defaultMaxSubCalls
@@ -68,32 +83,6 @@ func (budget *Budget) ReserveTurn() error {
 // under concurrent callers.
 func (budget *Budget) ReserveSubCall() error {
 	return reserve(&budget.subCalls, budget.MaxSubCalls, errSubCallsExceeded)
-}
-
-// ReserveSubCalls reserves count sub-calls in one atomic admission step, returning
-// errSubCallsExceeded — and reserving nothing — when the remaining budget cannot
-// cover the whole batch. Admitting the batch as a unit lets the parallel fan-out
-// accept or reject every pair together, so a batch larger than the remaining budget
-// produces no partial sub-calls. The compare-and-swap loop never exposes a transient
-// overshoot, so a concurrent batch that does fit is never spuriously rejected. A
-// non-positive count reserves nothing and succeeds.
-func (budget *Budget) ReserveSubCalls(count int) error {
-	if count <= 0 {
-		return nil
-	}
-
-	for {
-		current := budget.subCalls.Load()
-		next := current + int64(count)
-
-		if next > int64(budget.MaxSubCalls) {
-			return errSubCallsExceeded
-		}
-
-		if budget.subCalls.CompareAndSwap(current, next) {
-			return nil
-		}
-	}
 }
 
 // EnterDepth claims one recursion level, returning errDepthExceeded when the

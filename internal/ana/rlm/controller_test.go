@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/samber/oops"
 	"github.com/stretchr/testify/assert"
@@ -18,20 +19,24 @@ import (
 
 // mockEvalCapture is a testify mock of the EvalCapture seam: *repl.Interpreter and
 // this mock both satisfy the interface, so the controller loop drives either
-// through the same contract. Expectations script the Result Eval returns for a
-// turn's code and the answer Final resolves once a terminal primitive has run.
+// through the same contract. Expectations script the Result EvalContext returns for
+// a turn's code and the answer Final resolves once a terminal primitive has run.
 type mockEvalCapture struct {
 	mock.Mock
 }
 
-// Eval records its arguments and replays the Result scripted via
-// .On("Eval", name, src).Return(result, err).
-func (m *mockEvalCapture) Eval(name, src string) (repl.Result, error) {
-	args := m.Called(name, src)
+// EvalContext records its arguments and replays the Result scripted via
+// .On("EvalContext", ctx, timeout, name, src).Return(result, err).
+func (m *mockEvalCapture) EvalContext(
+	ctx context.Context,
+	timeout time.Duration,
+	name, src string,
+) (repl.Result, error) {
+	args := m.Called(ctx, timeout, name, src)
 
 	result, ok := args.Get(0).(repl.Result)
 	if !ok {
-		return repl.Result{Retval: reflect.Value{}, Stdout: "", Stderr: ""}, args.Error(1)
+		return repl.Result{Retval: reflect.Value{}, Stdout: ""}, args.Error(1)
 	}
 
 	return result, args.Error(1)
@@ -133,8 +138,8 @@ func assertControllerResolvesAnswer(t *testing.T, code, stdout, answer string) {
 		Return(doneTurn, nil).
 		Once()
 
-	eval.On("Eval", "turn_0", code).
-		Return(repl.Result{Retval: reflect.Value{}, Stdout: stdout, Stderr: ""}, nil).
+	eval.On("EvalContext", ctx, fixture.session.Budget.PerEvalTimeout, "turn_0", code).
+		Return(repl.Result{Retval: reflect.Value{}, Stdout: stdout}, nil).
 		Once()
 	eval.On("Final").
 		Return(answer, true).

@@ -12,9 +12,10 @@ const replayFinalAnswer = "Root cause: the i915 GPU driver oopsed during resume;
 // replayController is an offline Controller that answers every query by replaying
 // a fixed script of TraceEvents, optionally waiting a fixed pace before each event.
 // It performs no network calls and touches no live journal, so it drives the
-// shell's demo mode and the offline smoke through the very same Controller seam the
-// live RLM adapter satisfies, letting tests and demos exercise the full UI loop
-// without an OpenAI key.
+// shell's offline smoke through the very same Controller seam the live RLM adapter
+// satisfies, letting tests exercise the full UI loop without an OpenAI key. It is a
+// test-only double, so it lives in a _test.go helper rather than the production
+// binary.
 type replayController struct {
 	script []TraceEvent
 	pace   time.Duration
@@ -92,10 +93,9 @@ func (controller *replayController) wait(ctx context.Context) bool {
 	}
 }
 
-// defaultReplayScript returns the canned investigation transcript the offline demo
-// and smoke replay: one reasoning turn that inspects the latest boot, a nested
-// recursive query (its start and completing result one level deep), and the FINAL
-// answer.
+// defaultReplayScript returns the canned investigation transcript the offline smoke
+// replays: one reasoning turn that inspects the latest boot, a nested recursive
+// query (its start and completing result one level deep), and the FINAL answer.
 func defaultReplayScript() []TraceEvent {
 	return []TraceEvent{
 		replayLine(TraceKindThinking, "Inspecting the latest boot for failure signatures.", 0),
@@ -109,10 +109,11 @@ func defaultReplayScript() []TraceEvent {
 // depth.
 func replayLine(kind TraceKind, text string, depth int) TraceEvent {
 	return TraceEvent{
-		Kind:  kind,
-		Text:  text,
-		Err:   "",
-		Depth: depth,
-		RunID: 0,
+		Kind:    kind,
+		Text:    text,
+		Err:     "",
+		QueryID: 0,
+		Depth:   depth,
+		RunID:   0,
 	}
 }
