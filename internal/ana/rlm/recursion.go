@@ -197,8 +197,11 @@ func (r *recursor) interpreter(
 		Sink: store,
 		Sub:  r.subFor(ctx, node),
 		Budget: repl.QueryBudget{
-			MaxDepth:    repl.DefaultMaxDepth,
-			MaxSubCalls: repl.DefaultMaxSubCalls,
+			MaxDepth: repl.DefaultMaxDepth,
+			// Seed the per-session sub-call guard from the shared tree budget rather
+			// than the repl default, so a run configured with a larger Deps.MaxSubCalls
+			// is capped by the tree-wide §6 budget instead of being rejected early.
+			MaxSubCalls: r.budget.MaxSubCalls,
 		},
 	}
 

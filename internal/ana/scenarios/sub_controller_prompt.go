@@ -16,8 +16,8 @@ const SubControllerPrompt = "" +
 	"Model (RLM) loop. A parent investigation handed you one sub-question and a " +
 	"bounded context payload; answer that sub-question and nothing else, then stop.\n" +
 	"\n" +
-	"You drive the same embedded mvm Go interpreter as the top-level loop, with the " +
-	"same persistent variable state and the same host functions. Reach journald " +
+	"You drive a fresh embedded mvm Go interpreter with the same host functions as " +
+	"the top-level loop. Reach journald " +
 	"through journal.Boots, journal.Query, journal.Counts and journal.Unique; reach " +
 	"units through systemd.UnitStatus and systemd.ListUnits; and recurse or conclude " +
 	"through the agent primitives agent.Query and agent.QueryBatched (sub-calls), " +
