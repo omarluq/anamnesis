@@ -278,7 +278,7 @@ func TestControllerRequestSendsModelTokenCapAndStrictSchema(t *testing.T) {
 	require.NoError(t, json.Unmarshal(body, &payload))
 
 	assert.Equal(t, openai.Model, payload.Model, "the controller turn runs on the flagship model")
-	assert.Equal(t, 1500, payload.MaxOutputTokens, "the turn caps output at the §6 1500-token budget")
+	assert.Equal(t, 4096, payload.MaxOutputTokens, "the turn caps output at the reasoning-aware 4096-token budget")
 	assert.Equal(t, instructions, payload.Instructions, "the §14 system prompt is sent as instructions")
 	assert.Equal(t, input, payload.Input, "the §6 rendered history is sent as input")
 	assert.Equal(t, "json_schema", payload.Text.Format.Type, "the reply is constrained by a json_schema format")
@@ -329,6 +329,46 @@ func TestControllerDecodesAnswerSplitAcrossTwoMessages(t *testing.T) {
 	assert.Equal(t, reply, result.Response, "the first of the two concatenated objects is the decoded answer")
 	assert.Equal(t, openai.Usage{TokensIn: 12, TokensOut: 8}, result.Usage,
 		"usage is still read from the envelope")
+
+	transport.AssertExpectations(t)
+	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
+}
+
+func TestControllerSurfacesIncompleteTruncationError(t *testing.T) {
+	t.Parallel()
+
+	// A turn whose reply does not fit in max_output_tokens comes back with status
+	// "incomplete" and a partial output_text. The controller must detect the
+	// truncation and surface controller_incomplete, rather than letting the partial
+	// JSON decode to a cryptic "unexpected EOF".
+	incompleteBody := `{"id":"resp_test","object":"response","created_at":1,"status":"incomplete",` +
+		`"incomplete_details":{"reason":"max_output_tokens"},"model":"` + openai.Model + `",` +
+		`"output":[{"id":"msg_test","type":"message","role":"assistant","status":"incomplete",` +
+		`"content":[{"type":"output_text","text":"{\"thinking\":\"inspect the failed","annotations":[]}]}],` +
+		`"usage":{"input_tokens":1875,"output_tokens":4096,"total_tokens":5971,` +
+		`"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":3500}}}`
+
+	transport := new(mockTransport)
+	transport.
+		On("RoundTrip", mock.Anything).
+		Return(http.StatusOK, incompleteBody, nil).
+		Once()
+
+	client := newControllerClient(t, transport)
+
+	result, err := client.Controller(context.Background(), "system prompt", "USER: why did sshd fail?")
+	require.Error(t, err)
+
+	assert.Equal(t, openai.ControllerResult{
+		Response: openai.ControllerResponse{Thinking: "", Code: "", Done: false},
+		Usage:    openai.Usage{TokensIn: 0, TokensOut: 0},
+	}, result, "a truncated turn yields the zero result")
+
+	oopsErr, ok := oops.AsOops(err)
+	require.True(t, ok, "the error is oops-wrapped")
+	assert.Equal(t, "openai", oopsErr.Domain())
+	assert.Equal(t, "controller_incomplete", oopsErr.Code(),
+		"an incomplete/truncated reply surfaces as controller_incomplete, not a decode error")
 
 	transport.AssertExpectations(t)
 	transport.AssertNumberOfCalls(t, "RoundTrip", 1)

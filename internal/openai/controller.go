@@ -12,11 +12,13 @@ import (
 	"github.com/samber/oops"
 )
 
-// maxControllerOutputTokens caps a controller turn's output at the §6 budget
-// (1500 output tokens) so a single turn cannot overrun the per-call ceiling. The
-// matching 8000-input cap is the caller's job: it compacts history before the
-// call rather than relying on the API to truncate.
-const maxControllerOutputTokens = 1500
+// maxControllerOutputTokens caps a controller turn's output. gpt-5.5 is a reasoning
+// model whose hidden reasoning tokens draw from this same budget, so the cap must
+// cover reasoning plus the structured reply (thinking + a multi-line Go code block);
+// the former 1500 truncated reasoning turns into a partial reply that decoded to
+// "unexpected EOF". 4096 matches librecode's default output cap. The matching
+// 8000-input budget is the caller's job: it compacts history before the call.
+const maxControllerOutputTokens = 4096
 
 // controllerSchemaName names the structured-output schema sent to the Responses
 // API. It is restricted to the [A-Za-z0-9_-] characters the API allows.
@@ -57,6 +59,18 @@ func (client *Client) Controller(ctx context.Context, instructions, input string
 			In("openai").
 			Code("controller_call_failed").
 			Wrapf(err, "controller responses call on model %s", Model))
+	}
+
+	// A reply that did not fit in MaxOutputTokens comes back with status "incomplete"
+	// and a partial output_text; decoding that truncated JSON would surface as a
+	// cryptic "unexpected EOF". Detect the truncation up front and report it as an
+	// actionable error (mirrors librecode's Responses finish-reason classification).
+	if resp.Status == responses.ResponseStatusIncomplete {
+		return failedControllerTurn(oops.
+			In("openai").
+			Code("controller_incomplete").
+			Errorf("controller reply truncated (reason %q): too large for max_output_tokens=%d",
+				resp.IncompleteDetails.Reason, maxControllerOutputTokens))
 	}
 
 	parsed, err := decodeStructured[ControllerResponse](resp.OutputText(), "controller_decode")
