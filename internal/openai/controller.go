@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	openaisdk "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
@@ -95,10 +96,20 @@ func structuredFormat[T any](name, code string) (responses.ResponseFormatTextCon
 // text) into T, wrapping a decode failure as an oops error under code so a
 // malformed reply surfaces in the openai domain rather than as a bare
 // encoding/json error. The controller and judge roles share it.
+//
+// It decodes the first complete JSON value rather than json.Unmarshal-ing the
+// whole string: resp.OutputText concatenates the output_text of every output
+// item, and gpt-5.5 occasionally returns the structured answer across more than
+// one message item, so the concatenation is two schema-conformant objects
+// ("{...}{...}") that json.Unmarshal rejects as trailing data ("invalid
+// character '{' after top-level value"). Under strict structured output every
+// emitted object is the whole answer, so the first one is authoritative and any
+// duplicate that follows is ignored. A truncated or non-JSON reply still fails
+// here and surfaces under code.
 func decodeStructured[T any](raw, code string) (T, error) {
 	var out T
 
-	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+	if err := json.NewDecoder(strings.NewReader(raw)).Decode(&out); err != nil {
 		return out, oops.
 			In("openai").
 			Code(code).
