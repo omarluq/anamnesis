@@ -403,7 +403,7 @@ func TestAppRendersTranscriptComposerFooterAndQuits(t *testing.T) {
 	// Footer: the title, the usage totals, and the key hints — no side panes.
 	footer := screenRow(t, contents, "anamnesis")
 	assert.Contains(t, footer, "$2.0000", "the footer renders the accumulated cost")
-	assert.Contains(t, footer, "ctrl+t thinking", "the footer renders the key hints")
+	assert.Contains(t, footer, "ctrl+o queries", "the footer renders the key hints")
 	assert.NotContains(t, contents, "Trace", "no trace pane is rendered")
 	assert.NotContains(t, contents, "Metric", "no cost pane is rendered")
 }
