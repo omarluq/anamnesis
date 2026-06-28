@@ -43,11 +43,14 @@ type Deps struct {
 	MaxSubCalls int
 }
 
-// validate rejects a Deps that is nil or missing any collaborator, returning the
-// rlm-tagged assembly error Investigate surfaces before it dereferences a field, so
-// an incomplete wiring fails loudly at the boundary instead of panicking deep inside
-// an adapter on its first use. A nil receiver is reported the same way as a missing
-// field, since both mean a run cannot be assembled.
+// validate rejects a Deps that is nil, missing any collaborator, or carrying
+// invalid recursion limits, returning the rlm-tagged assembly error Investigate
+// surfaces before it dereferences a field, so an incomplete wiring fails loudly at
+// the boundary instead of panicking deep inside an adapter on its first use. A nil
+// receiver is reported the same way as a missing field, since both mean a run
+// cannot be assembled. The limit guard keeps a zero or negative MaxSubCalls from
+// seeding an already-exhausted budget that degrades every agent.Query to text, and
+// a negative MaxDepth from silently disabling recursion.
 func (deps *Deps) validate() error {
 	if deps == nil {
 		return oops.
@@ -67,6 +70,13 @@ func (deps *Deps) validate() error {
 			In("rlm").
 			Code("investigate_deps_missing").
 			Errorf("investigate requires every dependency to be supplied")
+	}
+
+	if deps.MaxDepth < 0 || deps.MaxSubCalls <= 0 {
+		return oops.
+			In("rlm").
+			Code("investigate_limits_invalid").
+			Errorf("investigate requires MaxDepth >= 0 and MaxSubCalls > 0")
 	}
 
 	return nil
