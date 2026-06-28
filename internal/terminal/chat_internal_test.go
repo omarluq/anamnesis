@@ -2,62 +2,54 @@ package terminal
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/gdamore/tcell/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
+	"github.com/omarluq/anamnesis/internal/transcript"
 )
 
 func newChatApp() *App {
-	return newApp(newFakeScreen(80, 24), RunOptions{
-		Trace:      nil,
-		Controller: nil,
-		Title:      defaultTitle,
-	})
+	return newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
 }
 
-func TestChatPaneRenderShowsWelcomeMarkdown(t *testing.T) {
+func TestTranscriptShowsWelcomeWhenEmpty(t *testing.T) {
 	t.Parallel()
 
 	app := newChatApp()
 
-	lines := chatRender(app, 60, 20)
-	require.NotEmpty(t, lines)
-
-	text := strings.Join(lines, "\n")
-	assert.Contains(t, text, "Type a message")
+	assert.Contains(t, transcriptText(app, 60), "Type a message", "the empty transcript shows the welcome line")
 }
 
-func TestChatPaneInsertsTypedRunesAndReportsEmptiness(t *testing.T) {
+func TestComposerInsertsTypedRunesAndReportsEmptiness(t *testing.T) {
 	t.Parallel()
 
 	app := newChatApp()
-	require.True(t, app.chat.composerEmpty())
+	require.True(t, app.composer.Empty())
 
 	for _, char := range "hello" {
 		composerInput(app, string(char), string(char))
 	}
 
-	assert.False(t, app.chat.composerEmpty())
-	assert.Equal(t, "hello", app.chat.composer.TextValue())
+	assert.False(t, app.composer.Empty())
+	assert.Equal(t, "hello", app.composer.TextValue())
 }
 
-func TestChatPaneIgnoresControlAndEmptyKeys(t *testing.T) {
+func TestComposerIgnoresControlAndEmptyKeys(t *testing.T) {
 	t.Parallel()
 
 	app := newChatApp()
 
-	// A ctrl-chord and an empty-text key must not mutate the composer.
 	composerInputCtrl(app, "ctrl+a")
 	composerInput(app, "f1", "")
 
-	assert.True(t, app.chat.composerEmpty())
+	assert.True(t, app.composer.Empty())
 }
 
-func TestChatPaneEditingKeysMoveAndDelete(t *testing.T) {
+func TestComposerEditingKeysMoveAndDelete(t *testing.T) {
 	t.Parallel()
 
 	app := newChatApp()
@@ -65,18 +57,16 @@ func TestChatPaneEditingKeysMoveAndDelete(t *testing.T) {
 		composerInput(app, string(char), string(char))
 	}
 
-	// Move the cursor left once then delete backward: "abc" -> "ac".
 	composerInput(app, "left", "")
 	composerInput(app, "backspace", "")
-	assert.Equal(t, "ac", app.chat.composer.TextValue())
+	assert.Equal(t, "ac", app.composer.TextValue())
 
-	// Move right back to the end and delete the trailing rune: "ac" -> "a".
 	composerInput(app, "right", "")
 	composerInput(app, "backspace", "")
-	assert.Equal(t, "a", app.chat.composer.TextValue())
+	assert.Equal(t, "a", app.composer.TextValue())
 }
 
-func TestChatPaneSubmitEchoesMessageAndClearsComposer(t *testing.T) {
+func TestSubmitEchoesUserMessageAndClearsComposer(t *testing.T) {
 	t.Parallel()
 
 	app := newChatApp()
@@ -86,35 +76,25 @@ func TestChatPaneSubmitEchoesMessageAndClearsComposer(t *testing.T) {
 
 	composerInput(app, "enter", "")
 
-	assert.True(t, app.chat.composerEmpty(), "composer is cleared after submit")
-
-	text := strings.Join(chatRender(app, 60, 40), "\n")
-	assert.Contains(t, text, "hello world", "submitted message echoes into the answer view")
-	assert.Contains(t, text, "you:", "submitted message is attributed to the user")
+	assert.True(t, app.composer.Empty(), "composer is cleared after submit")
+	assert.Equal(t, []transcript.Role{transcript.RoleUser}, historyRoles(app), "submit appends a user message")
+	assert.Contains(t, transcriptText(app, 60), "hello world", "the submitted message echoes into the transcript")
 }
 
-func TestChatPaneAppendAnswerRendersAssistantMarkdown(t *testing.T) {
+func TestSubmitOfWhitespaceIsNoop(t *testing.T) {
 	t.Parallel()
 
 	app := newChatApp()
 
-	app.chat.appendAnswer("**root cause:** the disk filled up")
+	composerInput(app, "enter", "")
 
-	text := strings.Join(chatRender(app, 60, 40), "\n")
-	assert.Contains(t, text, "root cause:", "the final answer markdown renders into the answer view")
-	assert.Contains(t, text, "ana:", "the rendered answer is attributed to the assistant")
-	assert.Contains(t, text, "Type a message", "the welcome body is preserved above the answer")
-}
+	for _, char := range "   " {
+		composerInput(app, string(char), string(char))
+	}
 
-func TestChatPaneAppendAnswerIgnoresBlankMarkdown(t *testing.T) {
-	t.Parallel()
+	composerInput(app, "enter", "")
 
-	app := newChatApp()
-	before := app.chat.view.Text
-
-	app.chat.appendAnswer("   \n\t ")
-
-	assert.Equal(t, before, app.chat.view.Text, "a blank final answer does not append to the answer view")
+	assert.Empty(t, app.history, "blank submissions do not append a message")
 }
 
 func TestComposerSubmitDrivesControllerRunThroughLoop(t *testing.T) {
@@ -136,44 +116,23 @@ func TestComposerSubmitDrivesControllerRunThroughLoop(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- app.loop(context.Background()) }()
 
-	for _, char := range query {
-		screen.inject(runeKey(string(char)))
-	}
-
-	screen.inject(tcell.NewEventKey(tcell.KeyEnter, "", tcell.ModNone))
-	// The run's scripted events flow through the swapped-in channel; wait until the
-	// turn line has drained and drawn before quitting so the assertion is not racy.
-	awaitContents(t, screen, "investigating")
+	submitQuery(screen, query)
+	awaitContents(t, screen, "all clear")
 	screen.inject(tcell.NewEventKey(tcell.KeyCtrlC, "", tcell.ModNone))
 	require.NoError(t, awaitLoop(t, done))
 
 	ctrl.AssertExpectations(t)
 	ctrl.AssertCalled(t, "Start", mock.Anything, query, uint64(1))
 	assert.Equal(t, uint64(1), app.runID, "submitting starts run #1")
-	assert.True(t, app.chat.composerEmpty(), "the composer clears once the query is submitted")
-	assert.Contains(t, traceLines(app), "[thinking] investigating",
-		"controller trace events reach the trace pane over the swapped channel")
-	assert.Contains(t, app.chat.view.Text, query, "the submitted question echoes into the answer view")
+	assert.True(t, app.composer.Empty(), "the composer clears once the query is submitted")
+	assert.Equal(t,
+		[]transcript.Role{transcript.RoleUser, transcript.RoleThinking, transcript.RoleAssistant},
+		historyRoles(app),
+		"the submit, the thinking turn, and the answer build the transcript")
+	assert.Contains(t, transcriptText(app, 80), query, "the submitted question echoes into the transcript")
 }
 
-func TestChatPaneSubmitOfWhitespaceIsNoop(t *testing.T) {
-	t.Parallel()
-
-	app := newChatApp()
-	before := app.chat.view.Text
-
-	composerInput(app, "enter", "")
-
-	for _, char := range "   " {
-		composerInput(app, string(char), string(char))
-	}
-
-	composerInput(app, "enter", "")
-
-	assert.Equal(t, before, app.chat.view.Text, "blank submissions do not append to the answer view")
-}
-
-func TestChatPaneDrawRendersBorderTitleAndComposer(t *testing.T) {
+func TestDrawRendersFooterTitle(t *testing.T) {
 	t.Parallel()
 
 	screen := newFakeScreen(40, 16)
@@ -182,11 +141,10 @@ func TestChatPaneDrawRendersBorderTitleAndComposer(t *testing.T) {
 	app := newApp(screen, RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
 	require.NoError(t, app.loop(context.Background()))
 
-	text := screen.contents()
-	assert.Contains(t, text, defaultTitle, "chat box renders its title in the border")
+	assert.Contains(t, screen.contents(), defaultTitle, "the footer renders the title")
 }
 
-func TestChatComposerCursorTracksCaret(t *testing.T) {
+func TestComposerCursorTracksCaret(t *testing.T) {
 	t.Parallel()
 
 	screen := newFakeScreen(80, 24)
@@ -195,12 +153,9 @@ func TestChatComposerCursorTracksCaret(t *testing.T) {
 	app.draw()
 
 	startColumn, startRow, startShown := screen.cursor()
-	require.True(t, startShown, "composer caret is shown when the composer is drawn")
-
-	wantColumn, wantRow, wantVisible := app.chat.cursorPosition()
-	require.True(t, wantVisible)
-	assert.Equal(t, wantColumn, startColumn, "native cursor matches the pane's caret column")
-	assert.Equal(t, wantRow, startRow, "native cursor matches the pane's caret row")
+	require.True(t, startShown, "the composer caret is shown when the composer is drawn")
+	assert.Equal(t, app.caretColumn, startColumn, "the native cursor matches the recorded caret column")
+	assert.Equal(t, app.caretRow, startRow, "the native cursor matches the recorded caret row")
 
 	for _, char := range "hi" {
 		composerInput(app, string(char), string(char))
@@ -210,23 +165,23 @@ func TestChatComposerCursorTracksCaret(t *testing.T) {
 
 	nextColumn, nextRow, nextShown := screen.cursor()
 	assert.True(t, nextShown)
-	assert.Equal(t, startRow, nextRow, "caret stays on the composer row while typing")
-	assert.Equal(t, startColumn+2, nextColumn, "caret advances one column per typed rune")
+	assert.Equal(t, startRow, nextRow, "the caret stays on the composer row while typing")
+	assert.Equal(t, startColumn+2, nextColumn, "the caret advances one column per typed rune")
 }
 
-func TestChatComposerCursorHiddenWhenComposerNotDrawn(t *testing.T) {
+func TestComposerCursorHiddenWhenFrameHasNoArea(t *testing.T) {
 	t.Parallel()
 
-	screen := newFakeScreen(1, 1)
+	screen := newFakeScreen(0, 10)
 	app := newApp(screen, RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
 
 	app.draw()
 
 	_, _, shown := screen.cursor()
-	assert.False(t, shown, "native cursor is hidden when the composer has no drawable area")
+	assert.False(t, shown, "the native cursor is hidden when the frame has no drawable area")
 }
 
-func TestChatShellDrawsIntoTinyScreenWithoutPanic(t *testing.T) {
+func TestShellDrawsIntoTinyScreenWithoutPanic(t *testing.T) {
 	t.Parallel()
 
 	assert.NotPanics(t, func() {
@@ -234,11 +189,7 @@ func TestChatShellDrawsIntoTinyScreenWithoutPanic(t *testing.T) {
 			screen := newFakeScreen(size[0], size[1])
 			screen.inject(tcell.NewEventKey(tcell.KeyCtrlC, "", tcell.ModNone))
 
-			app := newApp(screen, RunOptions{
-				Trace:      nil,
-				Controller: nil,
-				Title:      defaultTitle,
-			})
+			app := newApp(screen, RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
 			require.NoError(t, app.loop(context.Background()))
 		}
 	})
