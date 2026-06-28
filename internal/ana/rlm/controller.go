@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/samber/lo"
 	"github.com/samber/mo"
@@ -13,6 +14,14 @@ import (
 	"github.com/omarluq/anamnesis/internal/ana/repl"
 	"github.com/omarluq/anamnesis/internal/openai"
 )
+
+// maxHistoryFieldBytes caps how many bytes of a single turn's captured stdout or
+// rendered return value re-enter the controller's transcript. The defining RLM
+// property is that only a bounded view of output re-enters context; without this
+// cap a turn ending on a bare large-slice expression would render the whole
+// []Entry back into history and reintroduce the context rot the loop exists to
+// prevent. The bound is structural here, not left to the §14 prompt's policy.
+const maxHistoryFieldBytes = 4096
 
 // forceFinishHeader prefixes the §6 force-finish answer the loop returns when it
 // exhausts the turn budget or the session's wall-clock deadline before the
@@ -362,11 +371,28 @@ func newControllerTurn(
 ) ControllerTurn {
 	return ControllerTurn{
 		Code:   response.Code,
-		Stdout: result.Stdout,
-		Retval: renderRetval(result.Retval),
+		Stdout: capForHistory(result.Stdout),
+		Retval: capForHistory(renderRetval(result.Retval)),
 		Err:    renderErr(evalErr),
 		Index:  index,
 	}
+}
+
+// capForHistory truncates text to maxHistoryFieldBytes on a UTF-8 rune boundary,
+// appending an elision marker that records how many bytes were dropped, so an
+// oversized stdout or return value cannot grow the controller's context without
+// bound. Text already within the cap is returned unchanged.
+func capForHistory(text string) string {
+	if len(text) <= maxHistoryFieldBytes {
+		return text
+	}
+
+	cut := maxHistoryFieldBytes
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+
+	return text[:cut] + fmt.Sprintf("\n…[%d bytes elided to bound controller context]", len(text)-cut)
 }
 
 // renderRetval summarizes a turn's final expression value as a string, returning
