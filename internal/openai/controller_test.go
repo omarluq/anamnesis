@@ -368,3 +368,55 @@ func TestControllerSurfacesMalformedReplyAsDecodeError(t *testing.T) {
 	transport.AssertExpectations(t)
 	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
 }
+
+func TestControllerSurfacesTrailingGarbageAsDecodeError(t *testing.T) {
+	t.Parallel()
+
+	// A well-formed structured object followed by junk ("{...}garbage") must not
+	// slip through: json.Decoder.Decode reads only the first value and would leave
+	// the trailing bytes unread, so the decoder has to drain the rest and reject
+	// the non-JSON suffix as a controller_decode failure rather than letting a
+	// half-valid reply reach the loop.
+	reply := openai.ControllerResponse{
+		Thinking: "inspect the failed unit before concluding",
+		Code:     "boots := journal.Boots()",
+		Done:     false,
+	}
+
+	inner, err := json.Marshal(reply)
+	require.NoError(t, err)
+
+	object, err := json.Marshal(string(inner) + " not json at all")
+	require.NoError(t, err)
+
+	trailingBody := `{"id":"resp_test","object":"response","created_at":1,"status":"completed",` +
+		`"model":"` + openai.Model + `","output":[{"id":"msg_test","type":"message","role":"assistant",` +
+		`"status":"completed","content":[{"type":"output_text","text":` + string(object) + `,"annotations":[]}]}],` +
+		`"usage":{"input_tokens":5,"output_tokens":5,"total_tokens":10,` +
+		`"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":0}}}`
+
+	transport := new(mockTransport)
+	transport.
+		On("RoundTrip", mock.Anything).
+		Return(http.StatusOK, trailingBody, nil).
+		Once()
+
+	client := newControllerClient(t, transport)
+
+	result, err := client.Controller(context.Background(), "system prompt", "USER: why did sshd fail?")
+	require.Error(t, err, "trailing garbage after the first object must fail the turn")
+
+	assert.Equal(t, openai.ControllerResult{
+		Response: openai.ControllerResponse{Thinking: "", Code: "", Done: false},
+		Usage:    openai.Usage{TokensIn: 0, TokensOut: 0},
+	}, result, "a reply with trailing garbage yields the zero result")
+
+	oopsErr, ok := oops.AsOops(err)
+	require.True(t, ok, "the error is oops-wrapped")
+	assert.Equal(t, "openai", oopsErr.Domain())
+	assert.Equal(t, "controller_decode", oopsErr.Code(),
+		"trailing non-JSON content surfaces as an openai-domain decode error")
+
+	transport.AssertExpectations(t)
+	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
+}
