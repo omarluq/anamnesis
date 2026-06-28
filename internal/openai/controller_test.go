@@ -146,7 +146,7 @@ func newControllerClient(t *testing.T, transport http.RoundTripper) *openai.Clie
 	return client
 }
 
-func TestControllerParsesStructuredResponseAndUsage(t *testing.T) {
+func TestControllerParsesStructuredResponse(t *testing.T) {
 	t.Parallel()
 
 	reply := openai.ControllerResponse{
@@ -167,11 +167,106 @@ func TestControllerParsesStructuredResponseAndUsage(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, reply, result.Response, "the structured ControllerResponse fields round-trip")
-	assert.Equal(t, openai.Usage{TokensIn: 1875, TokensOut: 219}, result.Usage,
-		"the API usage block maps onto Usage")
 
 	transport.AssertExpectations(t)
 	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
+}
+
+// reasoningControllerResponseBody renders a Responses API success envelope that
+// carries a reasoning output item (its summary_text parts are the given summaries)
+// ahead of the message item holding the structured reply, so a test can drive
+// Controller against a turn that returned a reasoning summary. The envelope is
+// assembled as a raw JSON literal so the message item mirrors the wire shape the
+// real API sends and reuses no schema constants.
+func reasoningControllerResponseBody(t *testing.T, reply openai.ControllerResponse, summaries ...string) string {
+	t.Helper()
+
+	inner, err := json.Marshal(reply)
+	require.NoError(t, err)
+
+	outputText, err := json.Marshal(string(inner))
+	require.NoError(t, err)
+
+	type summaryPart struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+
+	parts := make([]summaryPart, len(summaries))
+	for index, summary := range summaries {
+		parts[index] = summaryPart{Type: "summary_text", Text: summary}
+	}
+
+	summaryJSON, err := json.Marshal(parts)
+	require.NoError(t, err)
+
+	return `{"id":"resp_test","object":"response","created_at":1,"status":"completed",` +
+		`"model":"` + openai.Model + `","output":[` +
+		`{"id":"rs_test","type":"reasoning","summary":` + string(summaryJSON) + `},` +
+		`{"id":"msg_test","type":"message","role":"assistant","status":"completed",` +
+		`"content":[{"type":"output_text","text":` + string(outputText) + `,"annotations":[]}]}],` +
+		`"usage":{"input_tokens":7,"output_tokens":9,"total_tokens":16,` +
+		`"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":5}}}`
+}
+
+func TestControllerExtractsReasoningSummaryOntoResult(t *testing.T) {
+	t.Parallel()
+
+	reply := openai.ControllerResponse{
+		Thinking: "inspect the failed unit",
+		Code:     "boots := journal.Boots()",
+		Done:     false,
+	}
+
+	transport := new(mockTransport)
+	transport.
+		On("RoundTrip", mock.Anything).
+		Return(http.StatusOK, reasoningControllerResponseBody(t, reply,
+			"First I listed the recent boots to find the failing window.",
+			"Then I narrowed in on sshd, which OOM-killed at 09:01."), nil).
+		Once()
+
+	client := newControllerClient(t, transport)
+
+	result, err := client.Controller(context.Background(), "system prompt", "USER: why did sshd fail?")
+	require.NoError(t, err)
+
+	assert.Equal(t,
+		"First I listed the recent boots to find the failing window.\n\n"+
+			"Then I narrowed in on sshd, which OOM-killed at 09:01.",
+		result.Response.Reasoning,
+		"the reasoning summary parts are joined as paragraphs onto the result")
+	assert.Equal(t, reply.Code, result.Response.Code, "the structured code still decodes alongside the summary")
+	assert.Equal(t, reply.Thinking, result.Response.Thinking, "the structured thinking still decodes")
+
+	transport.AssertExpectations(t)
+	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
+}
+
+func TestControllerLeavesReasoningEmptyWhenNoSummaryReturned(t *testing.T) {
+	t.Parallel()
+
+	reply := openai.ControllerResponse{
+		Thinking: "list the boots",
+		Code:     "fmt.Println(len(journal.Boots()))",
+		Done:     false,
+	}
+
+	transport := new(mockTransport)
+	transport.
+		On("RoundTrip", mock.Anything).
+		Return(http.StatusOK, controllerResponseBody(t, reply, 12, 8), nil).
+		Once()
+
+	client := newControllerClient(t, transport)
+
+	result, err := client.Controller(context.Background(), "system prompt", "USER: why did sshd fail?")
+	require.NoError(t, err)
+
+	assert.Empty(t, result.Response.Reasoning,
+		"a turn with no reasoning output item leaves the summary empty for the thinking fallback")
+
+	transport.AssertExpectations(t)
 }
 
 func TestControllerSurfacesModelNotFoundWithNoFallback(t *testing.T) {
@@ -193,7 +288,6 @@ func TestControllerSurfacesModelNotFoundWithNoFallback(t *testing.T) {
 
 	assert.Equal(t, openai.ControllerResult{
 		Response: openai.ControllerResponse{Thinking: "", Code: "", Done: false},
-		Usage:    openai.Usage{TokensIn: 0, TokensOut: 0},
 	}, result, "a failed turn yields the zero result")
 
 	oopsErr, ok := oops.AsOops(err)
@@ -284,6 +378,19 @@ func TestControllerRequestSendsModelTokenCapAndStrictSchema(t *testing.T) {
 	assert.Equal(t, "json_schema", payload.Text.Format.Type, "the reply is constrained by a json_schema format")
 	assert.Equal(t, "controller_response", payload.Text.Format.Name, "the structured-output schema is named")
 	assert.True(t, payload.Text.Format.Strict, "strict structured-output adherence is enabled")
+
+	// The turn must ask gpt-5.5 for a reasoning summary so the loop can render that
+	// prose as the turn's thinking. Decoded separately to keep the request-shape
+	// struct above unchanged.
+	var reasoning struct {
+		Reasoning struct {
+			Summary string `json:"summary"`
+		} `json:"reasoning"`
+	}
+
+	require.NoError(t, json.Unmarshal(body, &reasoning))
+	assert.Equal(t, "auto", reasoning.Reasoning.Summary,
+		"the turn asks gpt-5.5 for an auto reasoning summary to render as the turn's thinking")
 }
 
 func TestControllerDecodesAnswerSplitAcrossTwoMessages(t *testing.T) {
@@ -327,8 +434,6 @@ func TestControllerDecodesAnswerSplitAcrossTwoMessages(t *testing.T) {
 	require.NoError(t, err, "two concatenated objects must not fail the turn")
 
 	assert.Equal(t, reply, result.Response, "the first of the two concatenated objects is the decoded answer")
-	assert.Equal(t, openai.Usage{TokensIn: 12, TokensOut: 8}, result.Usage,
-		"usage is still read from the envelope")
 
 	transport.AssertExpectations(t)
 	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
@@ -361,7 +466,6 @@ func TestControllerSurfacesIncompleteTruncationError(t *testing.T) {
 
 	assert.Equal(t, openai.ControllerResult{
 		Response: openai.ControllerResponse{Thinking: "", Code: "", Done: false},
-		Usage:    openai.Usage{TokensIn: 0, TokensOut: 0},
 	}, result, "a truncated turn yields the zero result")
 
 	oopsErr, ok := oops.AsOops(err)
@@ -396,7 +500,6 @@ func TestControllerSurfacesMalformedReplyAsDecodeError(t *testing.T) {
 
 	assert.Equal(t, openai.ControllerResult{
 		Response: openai.ControllerResponse{Thinking: "", Code: "", Done: false},
-		Usage:    openai.Usage{TokensIn: 0, TokensOut: 0},
 	}, result, "a malformed model reply yields the zero result")
 
 	oopsErr, ok := oops.AsOops(err)
@@ -448,7 +551,6 @@ func TestControllerSurfacesTrailingGarbageAsDecodeError(t *testing.T) {
 
 	assert.Equal(t, openai.ControllerResult{
 		Response: openai.ControllerResponse{Thinking: "", Code: "", Done: false},
-		Usage:    openai.Usage{TokensIn: 0, TokensOut: 0},
 	}, result, "a reply with trailing garbage yields the zero result")
 
 	oopsErr, ok := oops.AsOops(err)

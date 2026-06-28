@@ -57,17 +57,14 @@ func (m *mockChatController) Start(ctx context.Context, query string, runID uint
 // compile-time assertion that mockChatController satisfies the Controller seam.
 var _ terminal.Controller = (*mockChatController)(nil)
 
-// chatTrace builds a fully-populated, token-free TraceEvent of kind carrying text
-// at top level, keeping the scripted run readable while satisfying exhaustruct.
+// chatTrace builds a TraceEvent of kind carrying text at top level, keeping the
+// scripted run readable while satisfying exhaustruct.
 func chatTrace(kind terminal.TraceKind, text string) terminal.TraceEvent {
 	return terminal.TraceEvent{
-		Kind:       kind,
-		Text:       text,
-		TokensIn:   0,
-		TokensOut:  0,
-		CostMicros: 0,
-		Depth:      0,
-		RunID:      0,
+		Kind:  kind,
+		Text:  text,
+		Depth: 0,
+		RunID: 0,
 	}
 }
 

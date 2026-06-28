@@ -17,42 +17,25 @@ func TestEmitter(t *testing.T) {
 
 	const runID = uint64(7)
 
-	events := make(chan terminal.TraceEvent, 5)
+	events := make(chan terminal.TraceEvent, 4)
 	emitter := rlm.NewEmitter(context.Background(), events, runID)
 
 	emitter.Thinking("planning")
 	emitter.QueryStart("fan out boot 3", 1)
 	emitter.QueryEnd("boot 3 oom-killed checkout-api", 1)
 	emitter.Final("root cause: oom-kill")
-	emitter.Usage(4000, 2000, 1234)
 	close(events)
 
-	got := make([]terminal.TraceEvent, 0, 5)
+	got := make([]terminal.TraceEvent, 0, 4)
 	for event := range events {
 		got = append(got, event)
 	}
 
 	want := []terminal.TraceEvent{
-		{
-			Kind: terminal.TraceKindThinking, Text: "planning",
-			TokensIn: 0, TokensOut: 0, CostMicros: 0, Depth: 0, RunID: runID,
-		},
-		{
-			Kind: terminal.TraceKindQueryStart, Text: "fan out boot 3",
-			TokensIn: 0, TokensOut: 0, CostMicros: 0, Depth: 1, RunID: runID,
-		},
-		{
-			Kind: terminal.TraceKindQueryEnd, Text: "boot 3 oom-killed checkout-api",
-			TokensIn: 0, TokensOut: 0, CostMicros: 0, Depth: 1, RunID: runID,
-		},
-		{
-			Kind: terminal.TraceKindFinal, Text: "root cause: oom-kill",
-			TokensIn: 0, TokensOut: 0, CostMicros: 0, Depth: 0, RunID: runID,
-		},
-		{
-			Kind: terminal.TraceKindUsage, Text: "",
-			TokensIn: 4000, TokensOut: 2000, CostMicros: 1234, Depth: 0, RunID: runID,
-		},
+		{Kind: terminal.TraceKindThinking, Text: "planning", Depth: 0, RunID: runID},
+		{Kind: terminal.TraceKindQueryStart, Text: "fan out boot 3", Depth: 1, RunID: runID},
+		{Kind: terminal.TraceKindQueryEnd, Text: "boot 3 oom-killed checkout-api", Depth: 1, RunID: runID},
+		{Kind: terminal.TraceKindFinal, Text: "root cause: oom-kill", Depth: 0, RunID: runID},
 	}
 
 	require.Len(t, got, len(want))
@@ -61,11 +44,6 @@ func TestEmitter(t *testing.T) {
 	for _, event := range got {
 		assert.Equal(t, runID, event.RunID, "every event carries the run ID")
 	}
-
-	usage := got[4]
-	assert.Equal(t, 4000, usage.TokensIn)
-	assert.Equal(t, 2000, usage.TokensOut)
-	assert.Equal(t, int64(1234), usage.CostMicros)
 }
 
 // TestEmitterCarriesQueryDepth proves the query lifecycle methods stamp the depth

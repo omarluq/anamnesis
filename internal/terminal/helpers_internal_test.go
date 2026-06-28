@@ -190,37 +190,25 @@ func runeKey(text string) *tcell.EventKey {
 	return tcell.NewEventKey(tcell.KeyRune, text, tcell.ModNone)
 }
 
-// traceEvent builds a fully-populated top-level TraceEvent, keeping table rows
+// traceEvent builds a top-level TraceEvent stamped with runID, keeping table rows
 // readable.
-func traceEvent(
-	kind TraceKind,
-	text string,
-	tokensIn, tokensOut int,
-	micros int64,
-	runID uint64,
-) TraceEvent {
+func traceEvent(kind TraceKind, text string, runID uint64) TraceEvent {
 	return TraceEvent{
-		Kind:       kind,
-		Text:       text,
-		Depth:      0,
-		TokensIn:   tokensIn,
-		TokensOut:  tokensOut,
-		CostMicros: micros,
-		RunID:      runID,
+		Kind:  kind,
+		Text:  text,
+		Depth: 0,
+		RunID: runID,
 	}
 }
 
-// traceDepthEvent builds a token-free TraceEvent at the given recursion depth so
-// indentation assertions bind the rendered prefix to the event's Depth.
+// traceDepthEvent builds a TraceEvent at the given recursion depth so indentation
+// assertions bind the rendered prefix to the event's Depth.
 func traceDepthEvent(kind TraceKind, text string, depth int) TraceEvent {
 	return TraceEvent{
-		Kind:       kind,
-		Text:       text,
-		Depth:      depth,
-		TokensIn:   0,
-		TokensOut:  0,
-		CostMicros: 0,
-		RunID:      0,
+		Kind:  kind,
+		Text:  text,
+		Depth: depth,
+		RunID: 0,
 	}
 }
 

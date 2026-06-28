@@ -93,44 +93,25 @@ func (controller *replayController) wait(ctx context.Context) bool {
 }
 
 // defaultReplayScript returns the canned investigation transcript the offline demo
-// and smoke replay: one reasoning turn that inspects the latest boot, a usage meter
-// for it, a nested recursive query (its start and completing result one level deep),
-// a usage meter for the sub-call, and the FINAL answer.
+// and smoke replay: one reasoning turn that inspects the latest boot, a nested
+// recursive query (its start and completing result one level deep), and the FINAL
+// answer.
 func defaultReplayScript() []TraceEvent {
 	return []TraceEvent{
 		replayLine(TraceKindThinking, "Inspecting the latest boot for failure signatures.", 0),
-		replayUsage(1280, 256, 900_000),
 		replayLine(TraceKindQueryStart, "summarize the panic backtrace", 1),
 		replayLine(TraceKindQueryEnd, "the i915 GPU driver oopsed during resume", 1),
-		replayUsage(512, 128, 600_000),
 		replayLine(TraceKindFinal, replayFinalAnswer, 0),
 	}
 }
 
-// replayLine builds a non-usage TraceEvent of kind carrying text at the given
-// recursion depth, leaving the token and cost fields zeroed.
+// replayLine builds a TraceEvent of kind carrying text at the given recursion
+// depth.
 func replayLine(kind TraceKind, text string, depth int) TraceEvent {
 	return TraceEvent{
-		Kind:       kind,
-		Text:       text,
-		Depth:      depth,
-		TokensIn:   0,
-		TokensOut:  0,
-		CostMicros: 0,
-		RunID:      0,
-	}
-}
-
-// replayUsage builds a usage TraceEvent carrying the token counts and cost the
-// shell tallies into the status footer.
-func replayUsage(tokensIn, tokensOut int, costMicros int64) TraceEvent {
-	return TraceEvent{
-		Kind:       TraceKindUsage,
-		Text:       "",
-		Depth:      0,
-		TokensIn:   tokensIn,
-		TokensOut:  tokensOut,
-		CostMicros: costMicros,
-		RunID:      0,
+		Kind:  kind,
+		Text:  text,
+		Depth: depth,
+		RunID: 0,
 	}
 }

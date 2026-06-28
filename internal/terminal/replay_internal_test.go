@@ -39,25 +39,20 @@ func TestReplayControllerReplaysScriptStampedWithRunID(t *testing.T) {
 
 	controller := newReplayController([]TraceEvent{
 		replayLine(TraceKindThinking, "looking", 0),
-		replayUsage(10, 4, 250_000),
 		replayLine(TraceKindFinal, "done", 0),
 	}, 0)
 
 	events := controller.Start(context.Background(), "ignored query", 7)
 	got := drainTrace(t, events)
 
-	require.Len(t, got, 3, "every scripted event is replayed before the channel closes")
+	require.Len(t, got, 2, "every scripted event is replayed before the channel closes")
 
 	for _, event := range got {
 		assert.Equal(t, uint64(7), event.RunID, "each replayed event is stamped with the run id")
 	}
 
 	assert.Equal(t, TraceKindThinking, got[0].Kind)
-	assert.Equal(t, TraceKindUsage, got[1].Kind)
-	assert.Equal(t, 10, got[1].TokensIn)
-	assert.Equal(t, 4, got[1].TokensOut)
-	assert.Equal(t, int64(250_000), got[1].CostMicros)
-	assert.Equal(t, TraceKindFinal, got[2].Kind)
+	assert.Equal(t, TraceKindFinal, got[1].Kind)
 }
 
 func TestReplayControllerLeavesScriptUnmutatedAcrossRuns(t *testing.T) {
@@ -121,10 +116,8 @@ func TestDefaultReplayScriptShowsThinkingAndNestedQuery(t *testing.T) {
 
 	assert.Equal(t, []TraceKind{
 		TraceKindThinking,
-		TraceKindUsage,
 		TraceKindQueryStart,
 		TraceKindQueryEnd,
-		TraceKindUsage,
 		TraceKindFinal,
 	}, kinds, "the demo script shows a thinking turn and a nested query lifecycle")
 

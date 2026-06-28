@@ -57,9 +57,6 @@ type App struct {
 
 	caretColumn  int
 	caretRow     int
-	tokensIn     int
-	tokensOut    int
-	costMicros   int64
 	runID        uint64
 	spinnerFrame int
 
@@ -86,9 +83,6 @@ func newApp(screen tcell.Screen, opts RunOptions) *App {
 		theme:         DefaultTheme(),
 		caretColumn:   0,
 		caretRow:      0,
-		tokensIn:      0,
-		tokensOut:     0,
-		costMicros:    0,
 		runID:         0,
 		spinnerFrame:  0,
 		caretVisible:  false,
@@ -178,20 +172,22 @@ func (app *App) handleTrace(event TraceEvent, ok bool) {
 	}
 }
 
-// applyTrace translates a trace event into a transcript mutation: thinking turns
-// and query starts mark the loop busy and append their blocks, a query end
-// completes its pending block, a final answer clears the busy state and appends the
-// assistant markdown, and usage accumulates into the footer totals.
+// applyTrace translates a trace event into a transcript mutation: thinking turns,
+// code starts, and query starts mark the loop busy and append their blocks; a code
+// end and a query end complete their pending blocks; and a final answer clears the
+// busy state and appends the assistant markdown.
 func (app *App) applyTrace(event TraceEvent) {
 	switch event.Kind {
-	case TraceKindUsage:
-		app.tokensIn += event.TokensIn
-		app.tokensOut += event.TokensOut
-		app.costMicros += event.CostMicros
 	case TraceKindThinking:
 		app.working = true
 
 		app.appendThinking(event.Text)
+	case TraceKindCodeStart:
+		app.working = true
+
+		app.appendCodeStart(event.Text)
+	case TraceKindCodeEnd:
+		app.completeCode(event.Text)
 	case TraceKindQueryStart:
 		app.working = true
 

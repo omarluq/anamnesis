@@ -12,14 +12,18 @@ const (
 	welcomeText = "Type a message and press Enter to begin."
 	// queryName labels every recursive sub-call block as the agent.Query primitive.
 	queryName = "agent.Query"
+	// codeName labels every per-turn code-evaluation block as the Go the controller
+	// ran in the embedded interpreter.
+	codeName = "code"
 	// thinkingLabel heads a thinking block (always shown in full).
 	thinkingLabel = "thinking"
 )
 
 // chatMessage is one entry in the scrolling transcript: a role plus its rendered
-// content. Query blocks (RoleToolResult) additionally carry their recursion Depth
-// for indentation and a Pending flag toggled between a TraceKindQueryStart and its
-// matching TraceKindQueryEnd.
+// content. Query blocks (RoleToolResult) and per-turn code blocks
+// (RoleBashExecution) additionally carry their recursion Depth for indentation and a
+// Pending flag toggled between a start event (TraceKindQueryStart / TraceKindCodeStart)
+// and its matching end (TraceKindQueryEnd / TraceKindCodeEnd).
 type chatMessage struct {
 	Role    transcript.Role
 	Content string
@@ -108,6 +112,54 @@ func queryContent(prompt, result string) string {
 		ArgumentsJSON: prompt,
 		DetailsJSON:   "",
 		Result:        result,
+		Error:         "",
+		IsError:       false,
+	})
+}
+
+// appendCodeStart opens a pending code-execution block carrying the turn's Go
+// source, settled by the matching completeCode once the interpreter returns. The
+// block sits at top level: the recursion structure is carried by the query blocks a
+// turn's agent.Query calls open, not by the code blocks themselves.
+func (app *App) appendCodeStart(code string) {
+	app.history = append(app.history, chatMessage{
+		Role:    transcript.RoleBashExecution,
+		Content: codeContent(code, ""),
+		Depth:   0,
+		Pending: true,
+	})
+}
+
+// completeCode fills the most recent pending code block with output, settling it. A
+// CodeEnd with no matching open block is ignored so a stray end event cannot corrupt
+// the transcript.
+func (app *App) completeCode(output string) {
+	for index, message := range slices.Backward(app.history) {
+		if !message.Pending || message.Role != transcript.RoleBashExecution {
+			continue
+		}
+
+		parsed := parseQueryContent(message.Content)
+		app.history[index] = chatMessage{
+			Role:    transcript.RoleBashExecution,
+			Content: codeContent(parsed.Args, output),
+			Depth:   0,
+			Pending: false,
+		}
+
+		return
+	}
+}
+
+// codeContent renders a code block's Go source and captured output into the
+// transcript's tool-event wire format, reusing the shared transcript formatter so a
+// code block parses and renders through the same path as a query block.
+func codeContent(code, output string) string {
+	return transcript.FormatToolEventDisplay(&transcript.ToolEvent{
+		Name:          codeName,
+		ArgumentsJSON: code,
+		DetailsJSON:   "",
+		Result:        output,
 		Error:         "",
 		IsError:       false,
 	})

@@ -106,8 +106,8 @@ func TestComposerSubmitDrivesControllerRunThroughLoop(t *testing.T) {
 	ctrl := new(mockController)
 	ctrl.On("Start", mock.Anything, query, uint64(1)).
 		Return(scriptedTrace(1,
-			traceEvent(TraceKindThinking, "investigating", 0, 0, 0, 0),
-			traceEvent(TraceKindFinal, "all clear", 6, 9, 1_000_000, 0),
+			traceEvent(TraceKindThinking, "investigating", 0),
+			traceEvent(TraceKindFinal, "all clear", 0),
 		)).
 		Once()
 

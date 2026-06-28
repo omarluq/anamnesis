@@ -42,21 +42,18 @@ const subSystemPrompt = "" +
 	"Respond in 50-200 words. No preamble. No closing. No filler. Markdown allowed " +
 	"but kept minimal."
 
-// SubResult is one sub-LLM call's outcome: the model's text reply plus the token
-// usage the call consumed, so the agent layer can both return the answer string
-// and bill the sub-call against the session budget.
+// SubResult is one sub-LLM call's outcome: the model's text reply, so the agent
+// layer can return the answer string.
 type SubResult struct {
 	// Text is the sub-LLM's reply with surrounding whitespace trimmed.
 	Text string
-	// Usage is the input/output token count the API reported for this call.
-	Usage Usage
 }
 
 // Sub makes one bounded, isolated sub-LLM call backing agent.Query: it sends the
 // §15 sub-LLM instructions and an input framing the prompt over the rendered
-// evidence, then returns the model's text reply paired with the call's token
-// usage. Oversized evidence is truncated to MaxSubEvidenceBytes before the request
-// goes out so a single sub-call honors the §7 ~16 KB render bound. The call runs
+// evidence, then returns the model's text reply. Oversized evidence is truncated
+// to MaxSubEvidenceBytes before the request goes out so a single sub-call honors
+// the §7 ~16 KB render bound. The call runs
 // on the same flagship Model as the controller — there is no cheaper sub-call
 // model — so a key without gpt-5.5 access fails loudly here too.
 func (client *Client) Sub(ctx context.Context, prompt, evidence string) (SubResult, error) {
@@ -75,10 +72,7 @@ func (client *Client) Sub(ctx context.Context, prompt, evidence string) (SubResu
 			Wrapf(err, "sub responses call on model %s", Model))
 	}
 
-	return SubResult{
-		Text:  strings.TrimSpace(resp.OutputText()),
-		Usage: usageFrom(&resp.Usage),
-	}, nil
+	return SubResult{Text: strings.TrimSpace(resp.OutputText())}, nil
 }
 
 // buildSubInput renders the sub-call input from the prompt and the evidence,
@@ -106,8 +100,5 @@ func truncateEvidence(evidence string) string {
 // fully-initialized result without an inline literal. Sub has a single error path
 // today; the helper exists for parity with failedControllerTurn and failedJudgePass.
 func failedSubCall(err error) (SubResult, error) {
-	return SubResult{
-		Text:  "",
-		Usage: Usage{TokensIn: 0, TokensOut: 0},
-	}, err
+	return SubResult{Text: ""}, err
 }

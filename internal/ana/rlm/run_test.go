@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -19,9 +18,11 @@ import (
 	"github.com/omarluq/anamnesis/internal/terminal"
 )
 
-// investigateTraceBuffer sizes the test trace channel so a whole run's events
-// queue without the synchronous emitter ever blocking on a full buffer.
-const investigateTraceBuffer = 16
+// investigateTraceBuffer sizes the test trace channel so a whole run's events —
+// each turn's thinking plus its code-start/code-end pair, and every sub-call's
+// query-start/query-end — queue without the synchronous emitter ever blocking on a
+// full buffer.
+const investigateTraceBuffer = 32
 
 // mockJournalHost is a testify mock of the repl.Journal host surface the assembled
 // investigation exposes to interpreted code. Investigate decorates it with the
@@ -246,11 +247,14 @@ func scriptControllerTurns(
 	}
 }
 
-// assertTraceSequence drains the run's five trace events and asserts they arrive in
-// the expected order — the first turn's thinking, the start and end of the sub-call
-// fanned out from the second turn, the second turn's thinking, and the final answer —
-// each stamped with the run ID. The root controller's sub-call carries depth 0 (its
-// own node depth); recursive child sub-calls would carry deeper levels.
+// assertTraceSequence drains a run's trace events and asserts the key lifecycle
+// events arrive in execution order amid the per-turn code blocks: the first turn's
+// thinking, the second turn's thinking, then the start and end of the sub-call the
+// second turn's code fanned out, and finally the answer — each stamped with the run
+// ID. recordTurn streams a turn's thinking before its code runs, so a sub-call's
+// query events follow their own turn's thinking rather than preceding it. The root
+// controller's sub-call carries depth 0 (its own node depth); recursive child
+// sub-calls would carry deeper levels.
 func assertTraceSequence(
 	t *testing.T,
 	events <-chan terminal.TraceEvent,
@@ -258,43 +262,59 @@ func assertTraceSequence(
 ) {
 	t.Helper()
 
-	assertTraceEvent(t, receiveTraceEvent(t, events), terminal.TraceKindThinking, thinking0)
-
-	start := receiveTraceEvent(t, events)
-	assertTraceEvent(t, start, terminal.TraceKindQueryStart, queryStart)
-	assert.Equal(t, 0, start.Depth, "the root sub-call's query start carries its node depth")
-
-	end := receiveTraceEvent(t, events)
-	assertTraceEvent(t, end, terminal.TraceKindQueryEnd, queryEnd)
-	assert.Equal(t, 0, end.Depth, "the root sub-call's query end carries its node depth")
-
-	assertTraceEvent(t, receiveTraceEvent(t, events), terminal.TraceKindThinking, thinking1)
-	assertTraceEvent(t, receiveTraceEvent(t, events), terminal.TraceKindFinal, final)
-}
-
-// receiveTraceEvent reads the next trace event off events, failing the test fast
-// instead of blocking until the package deadline when a regression drops an event.
-func receiveTraceEvent(t *testing.T, events <-chan terminal.TraceEvent) terminal.TraceEvent {
-	t.Helper()
-
-	select {
-	case event := <-events:
-		return event
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for trace event")
+	want := []struct {
+		kind terminal.TraceKind
+		text string
+	}{
+		{terminal.TraceKindThinking, thinking0},
+		{terminal.TraceKindThinking, thinking1},
+		{terminal.TraceKindQueryStart, queryStart},
+		{terminal.TraceKindQueryEnd, queryEnd},
+		{terminal.TraceKindFinal, final},
 	}
 
-	var zero terminal.TraceEvent
+	cursor, codeStarts, codeEnds := 0, 0, 0
 
-	return zero
+	for _, event := range drainTraceEvents(t, events) {
+		assert.Equal(t, fixtureRunID, event.RunID, "every event carries the run ID")
+
+		switch event.Kind {
+		case terminal.TraceKindCodeStart:
+			codeStarts++
+		case terminal.TraceKindCodeEnd:
+			codeEnds++
+		case terminal.TraceKindQueryStart, terminal.TraceKindQueryEnd:
+			assert.Equal(t, 0, event.Depth, "the root sub-call carries its node depth")
+		case terminal.TraceKindThinking, terminal.TraceKindFinal:
+		}
+
+		if cursor < len(want) && event.Kind == want[cursor].kind && event.Text == want[cursor].text {
+			cursor++
+		}
+	}
+
+	assert.Equal(t, len(want), cursor, "the key trace events arrive in execution order amid the code blocks")
+	assert.Equal(t, 2, codeStarts, "each turn with code opens a code block")
+	assert.Equal(t, 2, codeEnds, "each code block settles with its output")
 }
 
-// assertTraceEvent asserts one drained event carries the expected kind and text and
-// is stamped with the fixture run ID.
-func assertTraceEvent(t *testing.T, event terminal.TraceEvent, kind terminal.TraceKind, text string) {
+// drainTraceEvents collects every event currently buffered on events, stopping once
+// the channel is momentarily empty — safe because the run under test has already
+// returned, so no further events are coming. It fails fast when no event is ready,
+// catching a regression that drops the whole stream.
+func drainTraceEvents(t *testing.T, events <-chan terminal.TraceEvent) []terminal.TraceEvent {
 	t.Helper()
 
-	assert.Equal(t, kind, event.Kind)
-	assert.Equal(t, text, event.Text)
-	assert.Equal(t, fixtureRunID, event.RunID)
+	drained := make([]terminal.TraceEvent, 0)
+
+	for {
+		select {
+		case event := <-events:
+			drained = append(drained, event)
+		default:
+			require.NotEmpty(t, drained, "the run emitted no trace events")
+
+			return drained
+		}
+	}
 }
