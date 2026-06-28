@@ -16,6 +16,8 @@ func TestDefaultThemeColorsAreNonZero(t *testing.T) {
 	colors := []tcell.Color{
 		theme.Text, theme.Accent, theme.Success, theme.Warning, theme.Dim,
 		theme.Muted, theme.Border, theme.DiffAdd, theme.DiffDel,
+		theme.UserMessageBg, theme.ToolPendingBg, theme.ToolSuccessBg,
+		theme.ToolErrorBg, theme.ThinkingText,
 	}
 
 	for index, color := range colors {

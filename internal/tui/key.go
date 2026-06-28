@@ -96,7 +96,9 @@ func specialKeyName(key tcell.Key) (string, bool) {
 		tcell.KeyCtrlE:      "ctrl+e",
 		tcell.KeyCtrlF:      "ctrl+f",
 		tcell.KeyCtrlK:      "ctrl+k",
+		tcell.KeyCtrlO:      "ctrl+o",
 		tcell.KeyCtrlR:      keyCtrlR,
+		tcell.KeyCtrlT:      "ctrl+t",
 		tcell.KeyCtrlU:      "ctrl+u",
 		tcell.KeyCtrlW:      "ctrl+w",
 	}

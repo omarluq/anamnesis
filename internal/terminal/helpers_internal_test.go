@@ -10,6 +10,7 @@ import (
 	"github.com/gdamore/tcell/v3"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/omarluq/anamnesis/internal/transcript"
 	"github.com/omarluq/anamnesis/internal/tui"
 )
 
@@ -19,16 +20,9 @@ const loopTimeout = 2 * time.Second
 
 // fakeScreen is a minimal tcell.Screen used to drive the run loop without a real
 // terminal. It embeds tcell.Screen so it satisfies the interface, but only the
-// handful of methods the loop actually calls (EventQ, Size, Show, Sync,
-// SetContent, ShowCursor and HideCursor) are implemented. Any other method would
-// panic on the nil embedded interface, which keeps the test honest about what
-// the loop touches.
-//
-// This stays an embed-the-interface fake rather than a testify mock on purpose:
-// tcell.Screen carries ~30 methods, so a full mock would be far noisier than the
-// embed, and fakeScreen is not a stub but a stateful recorder — it captures the
-// rendered cell buffer plus the Show/Sync/cursor counts that assertions read
-// back, which a testify mock cannot model cleanly.
+// handful of methods the loop actually calls (EventQ, Size, Show, Sync, SetContent,
+// ShowCursor and HideCursor) are implemented. Any other method would panic on the
+// nil embedded interface, which keeps the test honest about what the loop touches.
 type fakeScreen struct {
 	tcell.Screen
 
@@ -98,8 +92,8 @@ func (screen *fakeScreen) SetContent(column, row int, primary rune, _ []rune, _ 
 	screen.mu.Unlock()
 }
 
-// ShowCursor records the latest native cursor placement so tests can assert
-// where the composer caret was positioned.
+// ShowCursor records the latest native cursor placement so tests can assert where
+// the composer caret was positioned.
 func (screen *fakeScreen) ShowCursor(column, row int) {
 	screen.mu.Lock()
 	screen.cursorColumn = column
@@ -168,26 +162,15 @@ func (screen *fakeScreen) contents() string {
 	return builder.String()
 }
 
-// mockController is a testify mock of the Controller seam. Both the live RLM
-// adapter (internal/ana/rlm) and this mock satisfy the interface, so the shell
-// can drive either a real investigation or a scripted demo through the same seam
-// without knowing which it holds. Expectations script the trace channel Start
-// replays, and AssertExpectations / AssertCalled confirm the shell drove Start
-// with the (query, runID) the test scripted.
-//
-// Controller is a single-method seam, so a testify mock is a clear win over a
-// hand-written stub: .On("Start", ...).Return(channel) scripts the run and the
-// built-in call recorder asserts the submit lifecycle with no bespoke
-// bookkeeping. The embedded mock.Mock is mutex-guarded, so the -race detector
-// stays quiet while the run loop calls Start from its own goroutine.
+// mockController is a testify mock of the Controller seam. Expectations script the
+// trace channel Start replays, and AssertExpectations / AssertCalled confirm the
+// shell drove Start with the (query, runID) the test scripted.
 type mockController struct {
 	mock.Mock
 }
 
 // Start records the (query, runID) it was driven with and replays the scripted
-// channel configured via .On("Start", ...).Return(channel), so tests can both
-// assert the shell's submit lifecycle and feed scripted trace events back
-// through the loop.
+// channel configured via .On("Start", ...).Return(channel).
 func (m *mockController) Start(ctx context.Context, query string, runID uint64) <-chan TraceEvent {
 	args := m.Called(ctx, query, runID)
 
@@ -219,24 +202,24 @@ func traceEvent(
 	return TraceEvent{
 		Kind:       kind,
 		Text:       text,
+		Depth:      0,
 		TokensIn:   tokensIn,
 		TokensOut:  tokensOut,
 		CostMicros: micros,
-		Depth:      0,
 		RunID:      runID,
 	}
 }
 
-// traceDepthEvent builds a token-free TraceEvent at sub-call nesting depth so
+// traceDepthEvent builds a token-free TraceEvent at the given recursion depth so
 // indentation assertions bind the rendered prefix to the event's Depth.
 func traceDepthEvent(kind TraceKind, text string, depth int) TraceEvent {
 	return TraceEvent{
 		Kind:       kind,
 		Text:       text,
+		Depth:      depth,
 		TokensIn:   0,
 		TokensOut:  0,
 		CostMicros: 0,
-		Depth:      depth,
 		RunID:      0,
 	}
 }
@@ -255,42 +238,59 @@ func scriptedTrace(runID uint64, events ...TraceEvent) <-chan TraceEvent {
 	return out
 }
 
-// composerInput feeds a printable key into the chat composer, mirroring the
+// composerInput feeds a printable or editing key into the composer, mirroring the
 // normalized key events the run loop routes in from the screen.
 func composerInput(app *App, key, text string) {
-	app.chat.handleKey(tui.KeyEvent{Key: key, Text: text, Ctrl: false, Alt: false, Shift: false})
+	app.composerKey(tui.KeyEvent{Key: key, Text: text, Ctrl: false, Alt: false, Shift: false})
 }
 
-// composerInputCtrl feeds a ctrl-chorded key into the chat composer.
+// composerInputCtrl feeds a ctrl-chorded key into the composer; the composer
+// ignores ctrl chords, so this proves they do not mutate the buffer.
 func composerInputCtrl(app *App, key string) {
-	app.chat.handleKey(tui.KeyEvent{Key: key, Text: "", Ctrl: true, Alt: false, Shift: false})
+	app.composerKey(tui.KeyEvent{Key: key, Text: "", Ctrl: true, Alt: false, Shift: false})
 }
 
-// traceLines returns the trace pane's accumulated line texts.
-func traceLines(app *App) []string {
-	texts := make([]string, 0, len(app.trace.view.Lines))
-	for _, line := range app.trace.view.Lines {
-		texts = append(texts, line.Text)
+// toggleKey applies a ctrl-chorded collapse toggle (ctrl+t / ctrl+o) the way the
+// run loop routes it before the composer sees it.
+func toggleKey(app *App, key string) bool {
+	return app.applyToggle(tui.KeyEvent{Key: key, Text: "", Ctrl: true, Alt: false, Shift: false})
+}
+
+// transcriptText renders the full transcript at width and joins every line's text,
+// so assertions can scan the rendered conversation as a single string.
+func transcriptText(app *App, width int) string {
+	var builder strings.Builder
+	for _, line := range app.transcriptLines(width) {
+		builder.WriteString(line.Text)
+		builder.WriteByte('\n')
 	}
 
-	return texts
+	return builder.String()
 }
 
-// chatRender returns the rendered answer lines as plain text.
-func chatRender(app *App, width, height int) []string {
-	lines := app.chat.view.Render(width, height)
-	texts := make([]string, 0, len(lines))
-
-	for _, line := range lines {
-		texts = append(texts, line.Text)
+// historyRoles returns the role of each transcript message in order, so structural
+// assertions read the conversation shape rather than rendered substrings.
+func historyRoles(app *App) []transcript.Role {
+	roles := make([]transcript.Role, 0, len(app.history))
+	for _, message := range app.history {
+		roles = append(roles, message.Role)
 	}
 
-	return texts
+	return roles
 }
 
-// screenRow returns the single rendered row of text that contains label,
-// failing the test when no row carries it. It binds a metric to the value on
-// its own line so assertions guard token routing instead of bare substrings.
+// submitQuery types text into the composer one rune at a time and presses Enter,
+// driving the shell's real submit path through the injected event channel.
+func submitQuery(screen *fakeScreen, text string) {
+	for _, char := range text {
+		screen.inject(runeKey(string(char)))
+	}
+
+	screen.inject(tcell.NewEventKey(tcell.KeyEnter, "", tcell.ModNone))
+}
+
+// screenRow returns the single rendered row of text that contains label, failing
+// the test when no row carries it.
 func screenRow(t *testing.T, text, label string) string {
 	t.Helper()
 
@@ -305,27 +305,8 @@ func screenRow(t *testing.T, text, label string) string {
 	return ""
 }
 
-// awaitRender waits until the screen has flushed at least want frames so a
-// throttled draw (one issued while the loop is working) completes before the
-// test inspects the rendered cells.
-func awaitRender(t *testing.T, screen *fakeScreen, want int) {
-	t.Helper()
-
-	deadline := time.After(loopTimeout)
-
-	for screen.showCount() < want {
-		select {
-		case <-deadline:
-			t.Fatal("timed out waiting for screen render")
-		case <-time.After(time.Millisecond):
-		}
-	}
-}
-
 // awaitContents waits until the rendered screen contains want, so a test can
-// synchronize on a drained-and-drawn trace line before driving further input.
-// It reads the mutex-guarded cell buffer, so polling races with the loop are
-// safe under the race detector.
+// synchronize on a drained-and-drawn transcript line before driving further input.
 func awaitContents(t *testing.T, screen *fakeScreen, want string) {
 	t.Helper()
 
@@ -340,8 +321,8 @@ func awaitContents(t *testing.T, screen *fakeScreen, want string) {
 	}
 }
 
-// sendTrace posts a trace event with a bounded wait so a wedged loop fails the
-// test instead of blocking forever on the unbuffered channel.
+// sendTrace posts a trace event with a bounded wait so a wedged loop fails the test
+// instead of blocking forever on the unbuffered channel.
 func sendTrace(t *testing.T, channel chan<- TraceEvent, event TraceEvent) {
 	t.Helper()
 
