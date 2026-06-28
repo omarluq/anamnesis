@@ -9,9 +9,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
+	"github.com/omarluq/anamnesis/internal/transcript"
 )
 
-func TestNewAppDefaultsTitleAndWiresPanes(t *testing.T) {
+func TestNewAppDefaultsTitleAndCollapsedState(t *testing.T) {
 	t.Parallel()
 
 	screen := newFakeScreen(80, 24)
@@ -19,36 +21,112 @@ func TestNewAppDefaultsTitleAndWiresPanes(t *testing.T) {
 	app := newApp(screen, RunOptions{Trace: nil, Controller: nil, Title: ""})
 	require.NotNil(t, app)
 	assert.Equal(t, defaultTitle, app.title)
-	assert.NotNil(t, app.chat, "chat pane is wired")
-	assert.NotNil(t, app.trace, "trace pane is wired")
-	assert.NotNil(t, app.cost, "cost pane is wired")
+	assert.Empty(t, app.history, "the transcript starts empty")
+	assert.True(t, app.composer.Empty(), "the composer starts empty")
+	assert.True(t, app.hideThinking, "thinking blocks start collapsed")
+	assert.False(t, app.toolsExpanded, "query blocks start unexpanded")
 
 	custom := newApp(screen, RunOptions{Trace: nil, Controller: nil, Title: "custom"})
 	assert.Equal(t, "custom", custom.title)
 }
 
-func TestHeaderTitleAppendsSpinnerOnlyWhileWorking(t *testing.T) {
+func TestFooterTitleAppendsSpinnerOnlyWhileWorking(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{
-		Trace:      nil,
-		Controller: nil,
-		Title:      defaultTitle,
-	})
+	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
 
-	assert.Equal(t, defaultTitle, app.headerTitle())
+	assert.Equal(t, defaultTitle, app.footerTitle())
 	assert.Empty(t, app.spinnerGlyph())
 
-	// A thinking event marks the loop working, so the header gains the spinner glyph.
+	// A thinking event marks the loop working, so the footer gains the spinner glyph.
 	app.applyTrace(traceEvent(TraceKindThinking, "thinking", 0, 0, 0, 0))
 	app.spinnerFrame = 0
-	assert.Equal(t, defaultTitle+" "+string(spinnerFrames[0]), app.headerTitle())
+	assert.Equal(t, defaultTitle+" "+string(spinnerFrames[0]), app.footerTitle())
 	assert.NotEmpty(t, app.spinnerGlyph())
 
 	// A final event clears the working state and retires the spinner.
 	app.applyTrace(traceEvent(TraceKindFinal, "done", 0, 0, 0, 0))
-	assert.Equal(t, defaultTitle, app.headerTitle())
+	assert.Equal(t, defaultTitle, app.footerTitle())
 	assert.Empty(t, app.spinnerGlyph())
+}
+
+func TestApplyTraceBuildsTranscriptAcrossKinds(t *testing.T) {
+	t.Parallel()
+
+	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+
+	app.applyTrace(traceDepthEvent(TraceKindThinking, "planning the search", 0))
+	app.applyTrace(traceDepthEvent(TraceKindQueryStart, "summarize the backtrace", 1))
+
+	require.Len(t, app.history, 2)
+	pending := app.history[1]
+	assert.Equal(t, transcript.RoleToolResult, pending.Role, "a query start opens a tool-result block")
+	assert.True(t, pending.Pending, "the query block is pending until its end event")
+	assert.Equal(t, 1, pending.Depth, "the query block records its recursion depth")
+
+	app.applyTrace(traceDepthEvent(TraceKindQueryEnd, "the i915 driver oopsed", 1))
+	assert.False(t, app.history[1].Pending, "the query end settles the pending block")
+
+	app.applyTrace(traceEvent(TraceKindFinal, "**root cause:** firmware", 0, 0, 0, 0))
+
+	assert.Equal(t,
+		[]transcript.Role{transcript.RoleThinking, transcript.RoleToolResult, transcript.RoleAssistant},
+		historyRoles(app),
+		"the transcript holds the thinking, query, and assistant messages in order")
+}
+
+func TestApplyTraceUsageAccumulatesIntoFooterTotals(t *testing.T) {
+	t.Parallel()
+
+	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+
+	app.applyTrace(traceEvent(TraceKindUsage, "", 2, 5, 250_000, 0))
+	app.applyTrace(traceEvent(TraceKindUsage, "", 4, 1, 250_000, 0))
+
+	assert.Equal(t, 6, app.tokensIn, "usage events tally input tokens")
+	assert.Equal(t, 6, app.tokensOut, "usage events tally output tokens")
+	assert.Equal(t, "$0.5000", app.dollars(), "usage events tally cost into the footer")
+	assert.Empty(t, app.history, "usage events never append a transcript message")
+}
+
+func TestApplyTraceFinalAppendsAssistantAndClearsSpinner(t *testing.T) {
+	t.Parallel()
+
+	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+
+	app.applyTrace(traceEvent(TraceKindThinking, "investigating", 0, 0, 0, 0))
+	require.True(t, app.working)
+
+	app.applyTrace(traceEvent(TraceKindFinal, "**root cause:** disk full", 0, 0, 0, 0))
+
+	assert.False(t, app.working, "a final answer clears the working state")
+	assert.Equal(t, transcript.RoleAssistant, app.history[len(app.history)-1].Role)
+	assert.Contains(t, transcriptText(app, 70), "root cause:", "the final answer markdown lands in the transcript")
+}
+
+func TestQueryToggleAndThinkingToggleRevealContent(t *testing.T) {
+	t.Parallel()
+
+	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+
+	app.applyTrace(traceDepthEvent(TraceKindThinking, "weighing the boots", 0))
+	app.applyTrace(traceDepthEvent(TraceKindQueryStart, "inspect boot 3", 1))
+	app.applyTrace(traceDepthEvent(TraceKindQueryEnd, "boot 3 panicked", 1))
+
+	collapsed := transcriptText(app, 80)
+	assert.Contains(t, collapsed, thinkingCollapsed, "thinking starts collapsed to a one-liner")
+	assert.NotContains(t, collapsed, "weighing the boots", "collapsed thinking hides its content")
+	assert.Contains(t, collapsed, "agent.Query", "the query block header always shows")
+	assert.Contains(t, collapsed, "boot 3 panicked", "the collapsed query block previews its output")
+	assert.NotContains(t, collapsed, labelArgs+":", "a collapsed query block hides its args section")
+
+	require.True(t, toggleKey(app, "ctrl+t"), "ctrl+t toggles thinking")
+	require.True(t, toggleKey(app, "ctrl+o"), "ctrl+o toggles query expansion")
+
+	expanded := transcriptText(app, 80)
+	assert.Contains(t, expanded, "weighing the boots", "expanded thinking reveals its content")
+	assert.Contains(t, expanded, labelArgs+":", "an expanded query block shows its args section")
+	assert.Contains(t, expanded, labelOutput+":", "an expanded query block shows its output section")
 }
 
 func TestStartRunBeginsControllerRunAndIgnoresSubmitWhileWorking(t *testing.T) {
@@ -59,15 +137,10 @@ func TestStartRunBeginsControllerRunAndIgnoresSubmitWhileWorking(t *testing.T) {
 		Return(scriptedTrace(1, traceEvent(TraceKindThinking, "looking", 0, 0, 0, 0))).
 		Once()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{
-		Trace:      nil,
-		Controller: ctrl,
-		Title:      defaultTitle,
-	})
+	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: ctrl, Title: defaultTitle})
 
 	require.Equal(t, uint64(0), app.runID)
 	require.False(t, app.working)
-	require.Nil(t, app.traceCh, "no run has swapped in a trace channel yet")
 
 	app.startRun(context.Background(), "first question")
 
@@ -78,23 +151,15 @@ func TestStartRunBeginsControllerRunAndIgnoresSubmitWhileWorking(t *testing.T) {
 	app.startRun(context.Background(), "second question")
 
 	assert.Equal(t, uint64(1), app.runID, "a submit while working does not start a new run")
-	assert.True(t, app.working)
 
-	// The controller was driven exactly once, for the first query only; the
-	// second submit was dropped while a run was in flight.
 	ctrl.AssertExpectations(t)
-	ctrl.AssertCalled(t, "Start", mock.Anything, "first question", uint64(1))
 	ctrl.AssertNotCalled(t, "Start", mock.Anything, "second question", mock.Anything)
 }
 
 func TestStartRunWithoutControllerStaysIdle(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{
-		Trace:      nil,
-		Controller: nil,
-		Title:      defaultTitle,
-	})
+	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
 
 	app.startRun(context.Background(), "question")
 
@@ -108,12 +173,8 @@ func TestStartRunCancelsRunContextOnLoopExit(t *testing.T) {
 
 	screen := newFakeScreen(80, 24)
 
-	// An open channel that never closes keeps the run in flight, so the only thing
-	// that can cancel the run's child context is the loop's deferred cancelRun.
 	var stream <-chan TraceEvent = make(chan TraceEvent)
 
-	// The buffered channel hands the run's child context back to the test goroutine
-	// without the closure assigning into a captured context (which fatcontext flags).
 	capturedCtx := make(chan context.Context, 1)
 
 	ctrl := new(mockController)
@@ -132,10 +193,6 @@ func TestStartRunCancelsRunContextOnLoopExit(t *testing.T) {
 	go func() { done <- app.loop(context.Background()) }()
 
 	submitQuery(screen, "why did it crash")
-	// The quit key is queued behind the submit, so Start has been driven and the
-	// run's child context captured by the time the loop processes the quit. The
-	// parent context here is never canceled, so a still-live captured context after
-	// the loop returns would prove the run goroutine was leaked.
 	screen.inject(tcell.NewEventKey(tcell.KeyCtrlC, "", tcell.ModNone))
 	require.NoError(t, awaitLoop(t, done))
 
@@ -153,11 +210,10 @@ func TestLoopQuitsOnCtrlC(t *testing.T) {
 	screen.inject(tcell.NewEventKey(tcell.KeyCtrlC, "", tcell.ModNone))
 
 	app := newApp(screen, RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
-	err := app.loop(context.Background())
+	require.NoError(t, app.loop(context.Background()))
 
-	require.NoError(t, err)
 	assert.GreaterOrEqual(t, screen.showCount(), 1, "the loop drew at least one frame before quitting")
-	assert.Contains(t, screen.contents(), defaultTitle, "the rendered screen shows the chat title")
+	assert.Contains(t, screen.contents(), defaultTitle, "the rendered footer shows the title")
 }
 
 func TestLoopQuitsOnEscape(t *testing.T) {
@@ -186,8 +242,6 @@ func TestLoopTreatsQAsTextWhenComposerHasContent(t *testing.T) {
 	t.Parallel()
 
 	screen := newFakeScreen(80, 24)
-	// Type "h", then "q": with a non-empty composer "q" is literal text, not a
-	// quit key. Ctrl-C then terminates the loop.
 	screen.inject(runeKey("h"))
 	screen.inject(runeKey("q"))
 	screen.inject(tcell.NewEventKey(tcell.KeyCtrlC, "", tcell.ModNone))
@@ -195,8 +249,8 @@ func TestLoopTreatsQAsTextWhenComposerHasContent(t *testing.T) {
 	app := newApp(screen, RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
 	require.NoError(t, app.loop(context.Background()))
 
-	assert.False(t, app.chat.composerEmpty())
-	assert.Equal(t, "hq", app.chat.composer.TextValue(), "q was inserted as text, not consumed as a quit key")
+	assert.False(t, app.composer.Empty())
+	assert.Equal(t, "hq", app.composer.TextValue(), "q was inserted as text, not consumed as a quit key")
 }
 
 func TestLoopReturnsOnContextCancel(t *testing.T) {
@@ -219,7 +273,6 @@ func TestLoopQuitsWhenEventChannelCloses(t *testing.T) {
 
 	app := newApp(screen, RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
 
-	// A nil event (closed channel yields the zero Event) terminates the loop.
 	require.NoError(t, app.loop(context.Background()))
 }
 
@@ -243,15 +296,13 @@ func TestLoopIgnoresUnknownKeyAndKeepsRunning(t *testing.T) {
 	t.Parallel()
 
 	screen := newFakeScreen(80, 24)
-	// F1 is not mapped by NewKeyEvent; the loop must ignore it and keep going
-	// until Ctrl-C arrives.
 	screen.inject(tcell.NewEventKey(tcell.KeyF1, "", tcell.ModNone))
 	screen.inject(tcell.NewEventKey(tcell.KeyCtrlC, "", tcell.ModNone))
 
 	app := newApp(screen, RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
 
 	require.NoError(t, app.loop(context.Background()))
-	assert.True(t, app.chat.composerEmpty())
+	assert.True(t, app.composer.Empty())
 }
 
 func TestLoopAppliesMatchingTraceAndIgnoresStaleRunID(t *testing.T) {
@@ -266,33 +317,27 @@ func TestLoopAppliesMatchingTraceAndIgnoresStaleRunID(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- app.loop(context.Background()) }()
 
-	// Matching RunID (0): a final event lands in the trace pane and a usage event
-	// tallies into the cost pane.
+	// Matching RunID (0): the final answer appends and the usage event tallies.
 	sendTrace(t, traceCh, traceEvent(TraceKindFinal, "answer", 0, 0, 0, 0))
-	sendTrace(t, traceCh, traceEvent(TraceKindUsage, "tally", 4, 10, 1_500_000, 0))
+	sendTrace(t, traceCh, traceEvent(TraceKindUsage, "", 4, 10, 1_500_000, 0))
 
 	// Stale RunID: both events must be dropped by the loop's run gating.
 	sendTrace(t, traceCh, traceEvent(TraceKindFinal, "stale", 0, 0, 0, 99))
-	sendTrace(t, traceCh, traceEvent(TraceKindUsage, "stale", 7, 8, 9_000_000, 99))
+	sendTrace(t, traceCh, traceEvent(TraceKindUsage, "", 7, 8, 9_000_000, 99))
 
+	awaitContents(t, screen, "$1.5000")
 	screen.inject(tcell.NewEventKey(tcell.KeyCtrlC, "", tcell.ModNone))
 	require.NoError(t, awaitLoop(t, done))
 
-	// Trace pane reflects only the matching final event.
-	require.Len(t, traceLines(app), 1)
-	assert.Equal(t, "[final] answer", traceLines(app)[0])
+	require.Len(t, app.history, 1, "only the matching final event appended a message")
+	assert.Equal(t, 4, app.tokensIn)
+	assert.Equal(t, 10, app.tokensOut)
+	assert.Equal(t, "$1.5000", app.dollars())
 
-	// Cost pane reflects only the matching usage event; its input and output token
-	// counts route to their own columns.
-	assert.Equal(t, 4, app.cost.tokensIn)
-	assert.Equal(t, 10, app.cost.tokensOut)
-	assert.Equal(t, int64(1_500_000), app.cost.costMicros)
-	assert.Equal(t, "$1.5000", app.cost.dollars())
-
-	// The drawn frame surfaces the trace and cost content.
 	contents := screen.contents()
 	assert.Contains(t, contents, "answer")
 	assert.Contains(t, contents, "$1.5000")
+	assert.NotContains(t, contents, "stale", "the stale-RunID answer never rendered")
 }
 
 func TestLoopContinuesAfterTraceChannelCloses(t *testing.T) {
@@ -309,66 +354,11 @@ func TestLoopContinuesAfterTraceChannelCloses(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- app.loop(ctx) }()
 
-	// The closed trace channel must be detached (not spin the loop) so the loop
-	// keeps running until the context is canceled.
 	cancel()
 	require.NoError(t, awaitLoop(t, done))
 }
 
-func TestApplyTraceRoutesUsageToCostAndRestToTrace(t *testing.T) {
-	t.Parallel()
-
-	app := newApp(newFakeScreen(80, 24), RunOptions{
-		Trace:      nil,
-		Controller: nil,
-		Title:      defaultTitle,
-	})
-
-	app.applyTrace(traceEvent(TraceKindThinking, "thinking", 0, 0, 0, 0))
-	app.applyTrace(traceEvent(TraceKindUsage, "meter", 2, 5, 250_000, 0))
-
-	require.Len(t, traceLines(app), 1, "non-usage events append to the trace pane")
-	assert.Equal(t, "[thinking] thinking", traceLines(app)[0])
-
-	assert.Equal(t, 2, app.cost.tokensIn, "usage events tally input tokens into the cost pane")
-	assert.Equal(t, 5, app.cost.tokensOut, "usage events tally output tokens into the cost pane")
-	assert.Equal(t, int64(250_000), app.cost.costMicros)
-}
-
-func TestApplyTraceFinalRendersAnswerAndClearsSpinner(t *testing.T) {
-	t.Parallel()
-
-	app := newApp(newFakeScreen(80, 24), RunOptions{
-		Trace:      nil,
-		Controller: nil,
-		Title:      defaultTitle,
-	})
-
-	// A thinking event marks the loop working, so the header carries the spinner glyph.
-	app.applyTrace(traceEvent(TraceKindThinking, "investigating", 0, 0, 0, 0))
-	app.spinnerFrame = 0
-	require.True(t, app.working)
-	require.Equal(t, defaultTitle+" "+string(spinnerFrames[0]), app.headerTitle())
-
-	// The final answer clears the working state and renders into the chat view.
-	app.applyTrace(traceEvent(TraceKindFinal, "**root cause:** disk full", 0, 0, 0, 0))
-
-	assert.False(t, app.working, "a final answer clears the working state")
-	assert.Equal(t, defaultTitle, app.headerTitle(), "the header no longer shows the spinner")
-	assert.Empty(t, app.spinnerGlyph(), "the spinner glyph retires once the run finishes")
-	assert.Contains(t, app.chat.view.Text, "root cause:", "the final answer markdown lands in the chat answer view")
-
-	// The final event still surfaces as the FINAL signal line in the trace pane.
-	assert.Contains(t, traceLines(app), "[final] **root cause:** disk full",
-		"the final event continues to append to the trace pane")
-}
-
-// TestAppRendersThreePanesAndQuits drives the full shell headlessly through a
-// recording tcell.Screen: it feeds one TraceEvent, confirms the chat, trace,
-// and cost panes all render non-empty content into a single frame, and that a
-// quit key cleanly returns the run loop without panicking or leaking the loop
-// goroutine.
-func TestAppRendersThreePanesAndQuits(t *testing.T) {
+func TestAppRendersTranscriptComposerFooterAndQuits(t *testing.T) {
 	t.Parallel()
 
 	screen := newFakeScreen(100, 32)
@@ -379,26 +369,22 @@ func TestAppRendersThreePanesAndQuits(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- app.loop(context.Background()) }()
 
-	// One live event flows through the channel into the trace pane.
-	sendTrace(t, traceCh, traceEvent(TraceKindFinal, "final answer", 5, 7, 2_000_000, 0))
+	sendTrace(t, traceCh, traceEvent(TraceKindFinal, "final answer", 0, 0, 0, 0))
+	sendTrace(t, traceCh, traceEvent(TraceKindUsage, "", 5, 7, 2_000_000, 0))
+	awaitContents(t, screen, "$2.0000")
 
-	// A quit key must terminate the loop with no error and no panic.
 	screen.inject(tcell.NewEventKey(tcell.KeyCtrlC, "", tcell.ModNone))
 	require.NoError(t, awaitLoop(t, done), "the run loop returns cleanly on quit")
 
 	contents := screen.contents()
-	require.NotEmpty(t, strings.TrimSpace(contents), "the shell rendered a non-empty frame")
+	require.NotEmpty(t, strings.TrimSpace(contents))
 
-	// Chat pane: bordered title plus the welcome body.
-	assert.Contains(t, contents, defaultTitle, "chat pane renders its title")
-	assert.Contains(t, contents, "Type a message", "chat pane renders the welcome body")
-	// Trace pane: box title plus the fed event.
-	assert.Contains(t, contents, "Trace", "trace pane renders its box title")
-	assert.Contains(t, contents, "final answer", "trace pane renders the fed event")
-	// Cost pane: the metric table headers.
-	assert.Contains(t, contents, "Metric", "cost pane renders its table header")
-	assert.Contains(t, contents, "Value", "cost pane renders its value column")
-
-	// awaitLoop above already proved the loop goroutine returned, so nothing leaks.
-	assert.GreaterOrEqual(t, screen.showCount(), 1, "the shell flushed at least one frame")
+	// Transcript: the appended assistant answer.
+	assert.Contains(t, contents, "final answer", "the transcript renders the assistant answer")
+	// Footer: the title, the usage totals, and the key hints — no side panes.
+	footer := screenRow(t, contents, "anamnesis")
+	assert.Contains(t, footer, "$2.0000", "the footer renders the accumulated cost")
+	assert.Contains(t, footer, "ctrl+t thinking", "the footer renders the key hints")
+	assert.NotContains(t, contents, "Trace", "no trace pane is rendered")
+	assert.NotContains(t, contents, "Metric", "no cost pane is rendered")
 }
