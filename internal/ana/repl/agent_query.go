@@ -163,17 +163,32 @@ func (runner *queryRunner) queryBatched(prompts []string, ctxs []any) []string {
 	return runner.fanOut(prompts, ctxs)
 }
 
+// maxFanOutConcurrency bounds how many sub-calls a single agent.QueryBatched
+// fan-out runs at once. Under the recursive sub-call adapter a single sub-call can
+// spawn a whole child controller loop, so an unbounded fan-out over a wide batch
+// could launch a runaway number of goroutines and live model calls; the limiter
+// caps the live breadth while the shared §6 budget still caps the total. The cap
+// is structural, not a knob the controller can talk past.
+const maxFanOutConcurrency = 8
+
 // fanOut runs one sub-call per (prompt, ctx) pair across host goroutines and
 // collects their replies into a slice indexed by position, so the results return
-// in the input order regardless of completion order. It waits for every sub-call
-// before reporting the first failure, so no goroutine outlives the turn.
+// in the input order regardless of completion order. A bounded semaphore caps how
+// many sub-calls run at once, so a wide batch of recursive sub-calls cannot launch
+// a runaway number of child loops. It waits for every sub-call before reporting
+// the first failure, so no goroutine outlives the turn.
 func (runner *queryRunner) fanOut(prompts []string, ctxs []any) []string {
 	replies := make([]string, len(prompts))
 	failures := make([]error, len(prompts))
+	semaphore := make(chan struct{}, maxFanOutConcurrency)
 	group := sync.WaitGroup{}
 
 	for index := range prompts {
+		semaphore <- struct{}{}
+
 		group.Go(func() {
+			defer func() { <-semaphore }()
+
 			replies[index], failures[index] = runner.callSub(prompts[index], ctxs[index])
 		})
 	}

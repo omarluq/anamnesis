@@ -34,6 +34,13 @@ type Deps struct {
 	Events chan<- terminal.TraceEvent
 	// RunID stamps every emitted trace event so the UI loop can drop stale work.
 	RunID uint64
+	// MaxDepth bounds how deep agent.Query may recurse: 0 keeps every sub-call a
+	// flat base-case call, the SPEC §6 default of 3 lets the tree recurse two
+	// levels below the root before the leaf falls back to a flat call.
+	MaxDepth int
+	// MaxSubCalls bounds the total agent.Query and agent.QueryBatched sub-calls the
+	// whole recursion tree may spend, shared across every level (SPEC §6: 30).
+	MaxSubCalls int
 }
 
 // validate rejects a Deps that is nil or missing any collaborator, returning the
@@ -66,12 +73,15 @@ func (deps *Deps) validate() error {
 }
 
 // Investigate assembles and runs one RLM investigation of question end to end: it
-// builds the citation store and trace emitter, wires an mvm REPL session over the
-// host surfaces with a visibility-recording journal and a sub-call seam that emits
-// a trace event per fan-out, frames the controller with the SPEC §14 system
-// prompt, and drives the audited turn loop under the §6 hard budget — a 120-second
-// wall-clock deadline layered onto ctx alongside the twelve-turn cap. It returns
-// the judge-approved final answer, which it also publishes as the terminal trace
+// builds the citation store, trace emitter, and shared tree-wide §6 budget, then
+// wires the root mvm REPL session over the host surfaces with a visibility-
+// recording journal and the recursive sub-call adapter, frames the controller with
+// the SPEC §14 system prompt, and drives the audited turn loop under the §6 hard
+// budget — a 120-second wall-clock deadline layered onto ctx alongside the
+// twelve-turn cap. agent.Query is genuinely recursive: a sub-call above the leaf
+// level spawns a full child controller loop one level deeper, while the leaf falls
+// back to a flat base-case call, all sharing one budget. It returns the
+// judge-approved final answer, which it also publishes as the terminal trace
 // event, or an oops error tagged with the rlm domain when the session cannot be
 // assembled or the loop fails.
 func Investigate(ctx context.Context, question string, deps *Deps) (string, error) {
@@ -79,15 +89,17 @@ func Investigate(ctx context.Context, question string, deps *Deps) (string, erro
 		return "", err
 	}
 
-	budget := NewBudget()
+	budget := newTreeBudget(deps)
 
 	ctx, cancel := context.WithTimeout(ctx, budget.WallTimeout)
 	defer cancel()
 
 	store := citations.NewStore()
 	emitter := NewEmitter(deps.Events, deps.RunID)
+	factory := newRecursor(deps, budget, emitter, emitterQueryTracer{emitter: emitter})
+	root := RecursionContext{CurrentDepth: 0, MaxDepth: deps.MaxDepth}
 
-	interpreter, err := buildInterpreter(ctx, deps, store, emitter)
+	interpreter, err := factory.interpreter(ctx, root, store)
 	if err != nil {
 		return "", err
 	}
@@ -114,40 +126,23 @@ func Investigate(ctx context.Context, question string, deps *Deps) (string, erro
 	return answer, nil
 }
 
-// buildInterpreter wires the mvm REPL session the controller drives each turn: the
-// journal surface is decorated so every query records its returned entries as
-// citable evidence, the citation store receives agent.Cite, and the sub-call seam
-// emits a trace event per fan-out before forwarding to deps.Sub under ctx. It
-// returns an oops error tagged with the rlm domain when repl.New rejects the
-// assembled config.
-func buildInterpreter(
-	ctx context.Context,
-	deps *Deps,
-	store *citations.Store,
-	emitter *Emitter,
-) (*repl.Interpreter, error) {
-	cfg := repl.Config{
-		Host: repl.HostDeps{
-			Journal: &recordingJournal{delegate: deps.Journal, store: store},
-			Systemd: deps.Systemd,
-		},
-		Sink: store,
-		Sub:  newEmittingSub(ctx, deps.Sub, emitter),
-		Budget: repl.QueryBudget{
-			MaxDepth:    repl.DefaultMaxDepth,
-			MaxSubCalls: repl.DefaultMaxSubCalls,
-		},
-	}
+// newTreeBudget builds the shared, tree-wide §6 budget for one investigation. The
+// sub-call ceiling is seeded from deps so the §6 cap on total sub-calls holds
+// across the whole tree rather than per controller loop. The §6 per-path recursion
+// depth is NOT enforced here: that is the job of RecursionContext.CanRecurse, which
+// stays correct under the concurrent QueryBatched fan-out where a shared atomic
+// gauge would conflate breadth with depth. The budget's depth gauge is instead a
+// backstop on concurrently-active recursion frames; since each live frame holds a
+// reserved sub-call, it is sized to the sub-call budget so it never refuses a
+// frame the sub-call budget would still admit. The turn budget and wall-clock
+// timeout keep their NewBudget defaults; each child controller loop gets its own
+// fresh turn budget.
+func newTreeBudget(deps *Deps) *Budget {
+	budget := NewBudget()
+	budget.MaxSubCalls = deps.MaxSubCalls
+	budget.MaxDepth = deps.MaxSubCalls
 
-	interpreter, err := repl.New(&cfg)
-	if err != nil {
-		return nil, oops.
-			In("rlm").
-			Code("investigate_session_unbuilt").
-			Wrapf(err, "assemble repl session")
-	}
-
-	return interpreter, nil
+	return budget
 }
 
 // recordingJournal decorates a journal host surface so every Query records the
@@ -192,37 +187,25 @@ func (surface *recordingJournal) Unique(field string, filter *journal.QueryFilte
 	return surface.delegate.Unique(field, filter)
 }
 
-// emittingSub adapts the rlm sub-LLM seam to the repl sub-call surface the
-// interpreter drives: it emits a sub-call trace event for every fan-out, then
-// forwards the call to the underlying SubLLM bound to the run context. It is a
-// real adapter the run assembles, not a test double.
-type emittingSub struct {
-	// answer forwards one sub-call to the underlying SubLLM under the run context.
-	answer func(prompt, evidence string) (string, error)
-	// emitter publishes the sub-call trace event each fan-out produces.
+// emitterQueryTracer bridges the narrow QueryTracer the recursion core emits
+// through to the run's Emitter. In this branch QueryStart re-emits the existing
+// sub-call trace event so the shell keeps rendering sub-calls and QueryEnd is a
+// no-op; Branch 2 replaces this bridge by making the Emitter satisfy QueryTracer
+// directly, carrying the result and depth through to a query-end trace event.
+type emitterQueryTracer struct {
+	// emitter publishes the sub-call trace event each query start produces.
 	emitter *Emitter
 }
 
-// newEmittingSub binds sub and ctx into a repl sub-call surface that emits onto
-// emitter. The run context is captured in the forwarding closure rather than
-// stored on the struct, matching the repl seam's context-free contract.
-func newEmittingSub(ctx context.Context, sub SubLLM, emitter *Emitter) *emittingSub {
-	return &emittingSub{
-		answer: func(prompt, evidence string) (string, error) {
-			return sub.Answer(ctx, prompt, evidence)
-		},
-		emitter: emitter,
-	}
+// Compile-time assertion that the bridge satisfies the recursion tracer seam.
+var _ QueryTracer = emitterQueryTracer{emitter: nil}
+
+// QueryStart re-emits the sub-call trace event carrying prompt, preserving the
+// existing trace stream while the depth argument waits for Branch 2 to consume it.
+func (t emitterQueryTracer) QueryStart(prompt string, _ int) {
+	t.emitter.SubCall(prompt)
 }
 
-// Compile-time assertion that the adapter satisfies the repl sub-call seam.
-var _ repl.SubLLM = (*emittingSub)(nil)
-
-// Sub emits a sub-call trace event carrying prompt, then forwards the call to the
-// underlying SubLLM, returning its reply and any error unchanged so the
-// interpreter surfaces a sub-call failure as a turn error.
-func (relay *emittingSub) Sub(prompt, evidence string) (string, error) {
-	relay.emitter.SubCall(prompt)
-
-	return relay.answer(prompt, evidence)
-}
+// QueryEnd drops the end event in this branch; Branch 2 carries the result and
+// depth through to a query-end trace event the shell renders.
+func (t emitterQueryTracer) QueryEnd(_ string, _ int) {}
