@@ -14,7 +14,12 @@ const (
 	defaultMaxTurns    = 12
 	defaultMaxDepth    = 3
 	defaultMaxSubCalls = 30
-	defaultWallTimeout = 120 * time.Second
+	// defaultWallTimeout is the hard wall-clock backstop for a whole investigation.
+	// gpt-5.5 is a reasoning model whose turns each take tens of seconds, so a
+	// multi-turn investigation needs far more than the original 120s (which tripped
+	// "context deadline exceeded" mid-run); the 12-turn and 30-sub-call budgets are
+	// the real bound, with this as the outer cap.
+	defaultWallTimeout = 600 * time.Second
 )
 
 // Distinct budget sentinels; each carries its own machine-readable oops code.
