@@ -79,5 +79,5 @@ func TestAppIntegrationReplayDrivesTranscriptAndDropsStaleRunID(t *testing.T) {
 
 	// The footer is the title and the key hints — no usage or cost accounting.
 	footer := screenRow(t, contents, "anamnesis")
-	assert.Contains(t, footer, "ctrl+o queries", "the footer renders the key hints")
+	assert.Contains(t, footer, "ctrl+o expand", "the footer renders the key hints")
 }

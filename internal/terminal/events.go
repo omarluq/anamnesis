@@ -9,8 +9,14 @@ type TraceKind string
 
 const (
 	// TraceKindThinking marks a reasoning turn the controller produced; the
-	// transcript renders it as a collapsible dim/italic thinking block.
+	// transcript renders it as a dim/italic thinking block. When the turn streamed
+	// its reasoning via TraceKindThinkingDelta, this event settles the pending block
+	// with the authoritative summary instead of appending a duplicate.
 	TraceKindThinking TraceKind = "thinking"
+	// TraceKindThinkingDelta marks one incremental chunk of the controller's reasoning
+	// summary streaming in; the transcript opens a pending thinking block on the first
+	// delta and appends each subsequent chunk so thinking renders live.
+	TraceKindThinkingDelta TraceKind = "thinking-delta"
 	// TraceKindCodeStart marks the start of a turn's generated-Go evaluation; the
 	// transcript opens a pending code block carrying the source.
 	TraceKindCodeStart TraceKind = "code-start"
@@ -39,6 +45,10 @@ type TraceEvent struct {
 	// (TraceKindQueryStart), the query result (TraceKindQueryEnd), or the final
 	// answer.
 	Text string
+	// Err is the error text for a settled code block that failed — empty on
+	// success. A non-empty Err lands in the block's error: section and paints the
+	// block red.
+	Err string
 	// Depth is the recursive sub-call nesting level: 0 for a top-level turn and
 	// higher for nested fan-out, indenting the rendered query block.
 	Depth int

@@ -75,8 +75,8 @@ const ControllerSystemPrompt = "" +
 	"must come from journal.Query results from THIS session. Fabricated cursors fail " +
 	"judge review.\n" +
 	"\n" +
-	"6. Budgets: max 12 turns, max recursion depth 3, max 30 sub-calls per session, " +
-	"120s wall time.\n" +
+	"6. Budgets: max 30 turns, max recursion depth 3, max 60 sub-calls per session, " +
+	"30min wall time.\n" +
 	"\n" +
 	"# Output contract\n" +
 	"\n" +

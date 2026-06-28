@@ -6,7 +6,6 @@ import (
 
 	openaisdk "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
-	"github.com/samber/oops"
 )
 
 // MaxSubEvidenceBytes is the byte ceiling for the evidence a single sub-call
@@ -17,11 +16,6 @@ import (
 // §15 system prompt and PROMPT/CONTEXT framing are added, so staying within the
 // token budget is the caller's job, not this ceiling's.
 const MaxSubEvidenceBytes = 16 * 1024
-
-// maxSubOutputTokens caps a sub-call's output at the §6 budget (2000 output
-// tokens). Sub-LLM replies are meant to be terse (50-200 words per §15), so the
-// ceiling bounds cost without truncating a well-behaved answer.
-const maxSubOutputTokens = 2000
 
 // truncationMarker is appended in place of the evidence Sub had to cut, so the
 // model can tell its context was shortened rather than silently losing the tail.
@@ -59,20 +53,23 @@ type SubResult struct {
 func (client *Client) Sub(ctx context.Context, prompt, evidence string) (SubResult, error) {
 	input := buildSubInput(prompt, evidence)
 
-	resp, err := client.api.Responses.New(ctx, responses.ResponseNewParams{
-		Model:           Model,
-		Instructions:    openaisdk.String(subSystemPrompt),
-		MaxOutputTokens: openaisdk.Int(maxSubOutputTokens),
-		Input:           responses.ResponseNewParamsInputUnion{OfString: openaisdk.String(input)},
-	})
+	// Stream the call so the shared truncation guard applies: a sub-reply the model
+	// could not finish surfaces as sub_incomplete rather than a silently truncated
+	// answer. Output is unbounded (no MaxOutputTokens) and reasoning runs at maximum
+	// effort so the sub-call reasons as hard as it can over its evidence; no reasoning
+	// summary is requested, and the reasoning deltas are discarded here — only the
+	// controller renders a summary.
+	output, _, err := client.streamResponses(ctx, &responses.ResponseNewParams{
+		Model:        Model,
+		Instructions: openaisdk.String(subSystemPrompt),
+		Input:        responses.ResponseNewParamsInputUnion{OfString: openaisdk.String(input)},
+		Reasoning:    responses.ReasoningParam{Effort: responses.ReasoningEffortXhigh},
+	}, nil, "sub")
 	if err != nil {
-		return failedSubCall(oops.
-			In("openai").
-			Code("sub_call_failed").
-			Wrapf(err, "sub responses call on model %s", Model))
+		return failedSubCall(err)
 	}
 
-	return SubResult{Text: strings.TrimSpace(resp.OutputText())}, nil
+	return SubResult{Text: strings.TrimSpace(output)}, nil
 }
 
 // buildSubInput renders the sub-call input from the prompt and the evidence,

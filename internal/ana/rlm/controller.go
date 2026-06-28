@@ -272,6 +272,7 @@ func (controller *Controller) respond(ctx context.Context) (openai.ControllerRes
 		controller.session.SystemPrompt,
 		controller.session.Question,
 		history,
+		func(delta string) { controller.session.Emitter.ThinkingDelta(delta) },
 	)
 	if err != nil {
 		return openai.ControllerResponse{Thinking: "", Code: "", Done: false}, oops.
@@ -338,20 +339,17 @@ func (controller *Controller) recordTurn(response openai.ControllerResponse) {
 	)
 
 	if hasCode {
-		controller.session.Emitter.CodeEnd(codeOutput(result, evalErr))
+		controller.session.Emitter.CodeEnd(codeOutput(result), renderErr(evalErr))
 	}
 }
 
 // codeOutput renders a turn's evaluation result for the transcript's code block:
-// any evaluation error first so a failed turn shows what went wrong, then the
-// captured stdout, then the final expression's value. Empty sections are omitted so
-// a silent turn renders an empty block rather than blank-line noise.
-func codeOutput(result repl.Result, evalErr error) string {
-	sections := make([]string, 0, 3)
-
-	if errText := renderErr(evalErr); errText != "" {
-		sections = append(sections, "error: "+errText)
-	}
+// the captured stdout followed by the final expression's value. The evaluation
+// error is NOT folded in — it travels as CodeEnd's separate errText so a failed turn
+// renders as a red block. Empty sections are omitted so a silent turn renders an
+// empty block rather than blank-line noise.
+func codeOutput(result repl.Result) string {
+	sections := make([]string, 0, 2)
 
 	if stdout := strings.TrimRight(result.Stdout, "\n"); stdout != "" {
 		sections = append(sections, stdout)

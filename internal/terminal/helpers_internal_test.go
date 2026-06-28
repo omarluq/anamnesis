@@ -196,6 +196,7 @@ func traceEvent(kind TraceKind, text string, runID uint64) TraceEvent {
 	return TraceEvent{
 		Kind:  kind,
 		Text:  text,
+		Err:   "",
 		Depth: 0,
 		RunID: runID,
 	}
@@ -207,6 +208,7 @@ func traceDepthEvent(kind TraceKind, text string, depth int) TraceEvent {
 	return TraceEvent{
 		Kind:  kind,
 		Text:  text,
+		Err:   "",
 		Depth: depth,
 		RunID: 0,
 	}

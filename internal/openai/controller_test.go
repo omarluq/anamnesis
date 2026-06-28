@@ -71,8 +71,13 @@ func (m *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	status := args.Int(0)
 	body := args.String(1)
 
+	// Every Responses call is now a streaming call, so a success body is a
+	// Server-Sent-Events stream. text/event-stream is the faithful content type; it
+	// is not load-bearing, though — the SDK registers no per-content-type stream
+	// decoder, so its default event-stream decoder parses the body whatever this
+	// says, and a non-2xx error body is read regardless of content type.
 	header := make(http.Header)
-	header.Set("Content-Type", "application/json")
+	header.Set("Content-Type", "text/event-stream")
 
 	return &http.Response{
 		StatusCode:    status,
@@ -89,46 +94,94 @@ func (m *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 // compile-time assertion that mockTransport satisfies http.RoundTripper.
 var _ http.RoundTripper = (*mockTransport)(nil)
 
-// controllerResponseBody renders a Responses API success envelope whose output
-// text is the model's structured reply (reply marshaled to JSON) and whose usage
-// block reports the given token counts, so a test can drive Controller end to end
-// through the mock transport.
-func controllerResponseBody(t *testing.T, reply openai.ControllerResponse, tokensIn, tokensOut int) string {
+// sseKeyType is the JSON field every Responses streaming event carries its event
+// type in; the SDK's decoder switches on it, so the frame builders below stamp it
+// onto each event object rather than repeating the bare "type" key.
+const sseKeyType = "type"
+
+// sseEvent renders one Responses streaming event as a Server-Sent-Events frame: a
+// single data: line carrying the event JSON, terminated by the blank line the SDK's
+// event-stream decoder needs to dispatch the event. The SDK reads each event's type
+// off the data payload's own "type" field rather than the SSE "event:" line, so the
+// event: line is omitted as redundant.
+func sseEvent(t *testing.T, event map[string]any) string {
+	t.Helper()
+
+	payload, err := json.Marshal(event)
+	require.NoError(t, err)
+
+	return "data: " + string(payload) + "\n\n"
+}
+
+// outputTextDeltaFrame renders one response.output_text.delta SSE frame carrying
+// text — the event whose deltas streamResponses accumulates into the reply. It is
+// the one place the output-text event type is spelled, so the stream builders below
+// compose it rather than repeating the wire string.
+func outputTextDeltaFrame(t *testing.T, text string) string {
+	t.Helper()
+
+	return sseEvent(t, map[string]any{sseKeyType: "response.output_text.delta", "delta": text})
+}
+
+// completedFrame renders the terminal response.completed SSE frame whose response
+// object reports status "completed", the event that ends a reply that fit the cap.
+func completedFrame(t *testing.T) string {
+	t.Helper()
+
+	return sseEvent(t, map[string]any{
+		sseKeyType: "response.completed",
+		"response": map[string]any{"id": "resp_test", "status": "completed"},
+	})
+}
+
+// completedStream renders a full Responses SSE stream that emits each delta as an
+// output_text frame, then the terminal completed frame. The deltas concatenate into
+// the output text streamResponses hands back, so a caller can drive any role end to
+// end through the streaming transport; passing several deltas exercises the helper's
+// across-delta accumulation.
+func completedStream(t *testing.T, deltas ...string) string {
+	t.Helper()
+
+	var stream strings.Builder
+
+	for _, delta := range deltas {
+		stream.WriteString(outputTextDeltaFrame(t, delta))
+	}
+
+	stream.WriteString(completedFrame(t))
+
+	return stream.String()
+}
+
+// incompleteStream renders a Responses SSE stream that emits a partial output_text
+// frame then a terminal response.incomplete event whose response object reports
+// status "incomplete" and incomplete_details.reason "max_output_tokens" — the
+// truncation a reasoning model hits when its hidden reasoning plus the reply overrun
+// max_output_tokens. It drives a role's shared *_incomplete guard.
+func incompleteStream(t *testing.T, partial string) string {
+	t.Helper()
+
+	return outputTextDeltaFrame(t, partial) + sseEvent(t, map[string]any{
+		sseKeyType: "response.incomplete",
+		"response": map[string]any{
+			"id":                 "resp_test",
+			"status":             "incomplete",
+			"incomplete_details": map[string]any{"reason": "max_output_tokens"},
+		},
+	})
+}
+
+// controllerResponseBody renders a Responses SSE stream whose output_text deltas
+// carry the model's structured reply (reply marshaled to JSON), terminated by a
+// response.completed event, so a test can drive Controller end to end through the
+// streaming transport.
+func controllerResponseBody(t *testing.T, reply openai.ControllerResponse) string {
 	t.Helper()
 
 	inner, err := json.Marshal(reply)
 	require.NoError(t, err)
 
-	envelope := map[string]any{
-		"id":         "resp_test",
-		"object":     "response",
-		"created_at": 1,
-		"status":     "completed",
-		"model":      openai.Model,
-		"output": []map[string]any{
-			{
-				"id":     "msg_test",
-				"type":   "message",
-				"role":   "assistant",
-				"status": "completed",
-				"content": []map[string]any{
-					{"type": "output_text", "text": string(inner), "annotations": []any{}},
-				},
-			},
-		},
-		"usage": map[string]any{
-			"input_tokens":          tokensIn,
-			"output_tokens":         tokensOut,
-			"total_tokens":          tokensIn + tokensOut,
-			"input_tokens_details":  map[string]any{"cached_tokens": 0},
-			"output_tokens_details": map[string]any{"reasoning_tokens": 0},
-		},
-	}
-
-	out, err := json.Marshal(envelope)
-	require.NoError(t, err)
-
-	return string(out)
+	return completedStream(t, string(inner))
 }
 
 // newControllerClient builds an openai client whose Responses calls are served by
@@ -158,12 +211,12 @@ func TestControllerParsesStructuredResponse(t *testing.T) {
 	transport := new(mockTransport)
 	transport.
 		On("RoundTrip", mock.Anything).
-		Return(http.StatusOK, controllerResponseBody(t, reply, 1875, 219), nil).
+		Return(http.StatusOK, controllerResponseBody(t, reply), nil).
 		Once()
 
 	client := newControllerClient(t, transport)
 
-	result, err := client.Controller(context.Background(), "system prompt", "USER: why did sshd fail?")
+	result, err := client.Controller(context.Background(), "system prompt", "USER: why did sshd fail?", nil)
 	require.NoError(t, err)
 
 	assert.Equal(t, reply, result.Response, "the structured ControllerResponse fields round-trip")
@@ -172,41 +225,29 @@ func TestControllerParsesStructuredResponse(t *testing.T) {
 	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
 }
 
-// reasoningControllerResponseBody renders a Responses API success envelope that
-// carries a reasoning output item (its summary_text parts are the given summaries)
-// ahead of the message item holding the structured reply, so a test can drive
-// Controller against a turn that returned a reasoning summary. The envelope is
-// assembled as a raw JSON literal so the message item mirrors the wire shape the
-// real API sends and reuses no schema constants.
+// reasoningControllerResponseBody renders a Responses SSE stream that emits the
+// given summaries as response.reasoning_summary_text.delta events ahead of the
+// reply's output_text delta and the terminal response.completed event, so a test
+// can drive Controller against a turn that streamed a reasoning summary. The
+// summaries are joined by a blank line — the way the loop renders a multi-part
+// summary as paragraphs — and that joined prose is what streamResponses accumulates
+// onto the turn's Reasoning.
 func reasoningControllerResponseBody(t *testing.T, reply openai.ControllerResponse, summaries ...string) string {
 	t.Helper()
 
 	inner, err := json.Marshal(reply)
 	require.NoError(t, err)
 
-	outputText, err := json.Marshal(string(inner))
-	require.NoError(t, err)
+	var stream strings.Builder
 
-	type summaryPart struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	}
+	stream.WriteString(sseEvent(t, map[string]any{
+		sseKeyType: "response.reasoning_summary_text.delta",
+		"delta":    strings.Join(summaries, "\n\n"),
+	}))
+	stream.WriteString(outputTextDeltaFrame(t, string(inner)))
+	stream.WriteString(completedFrame(t))
 
-	parts := make([]summaryPart, len(summaries))
-	for index, summary := range summaries {
-		parts[index] = summaryPart{Type: "summary_text", Text: summary}
-	}
-
-	summaryJSON, err := json.Marshal(parts)
-	require.NoError(t, err)
-
-	return `{"id":"resp_test","object":"response","created_at":1,"status":"completed",` +
-		`"model":"` + openai.Model + `","output":[` +
-		`{"id":"rs_test","type":"reasoning","summary":` + string(summaryJSON) + `},` +
-		`{"id":"msg_test","type":"message","role":"assistant","status":"completed",` +
-		`"content":[{"type":"output_text","text":` + string(outputText) + `,"annotations":[]}]}],` +
-		`"usage":{"input_tokens":7,"output_tokens":9,"total_tokens":16,` +
-		`"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":5}}}`
+	return stream.String()
 }
 
 func TestControllerExtractsReasoningSummaryOntoResult(t *testing.T) {
@@ -228,7 +269,10 @@ func TestControllerExtractsReasoningSummaryOntoResult(t *testing.T) {
 
 	client := newControllerClient(t, transport)
 
-	result, err := client.Controller(context.Background(), "system prompt", "USER: why did sshd fail?")
+	var streamed strings.Builder
+
+	result, err := client.Controller(context.Background(), "system prompt", "USER: why did sshd fail?",
+		func(delta string) { streamed.WriteString(delta) })
 	require.NoError(t, err)
 
 	assert.Equal(t,
@@ -236,6 +280,8 @@ func TestControllerExtractsReasoningSummaryOntoResult(t *testing.T) {
 			"Then I narrowed in on sshd, which OOM-killed at 09:01.",
 		result.Response.Reasoning,
 		"the reasoning summary parts are joined as paragraphs onto the result")
+	assert.Equal(t, result.Response.Reasoning, streamed.String(),
+		"every reasoning-summary delta is forwarded live to the onReasoning callback")
 	assert.Equal(t, reply.Code, result.Response.Code, "the structured code still decodes alongside the summary")
 	assert.Equal(t, reply.Thinking, result.Response.Thinking, "the structured thinking still decodes")
 
@@ -255,16 +301,16 @@ func TestControllerLeavesReasoningEmptyWhenNoSummaryReturned(t *testing.T) {
 	transport := new(mockTransport)
 	transport.
 		On("RoundTrip", mock.Anything).
-		Return(http.StatusOK, controllerResponseBody(t, reply, 12, 8), nil).
+		Return(http.StatusOK, controllerResponseBody(t, reply), nil).
 		Once()
 
 	client := newControllerClient(t, transport)
 
-	result, err := client.Controller(context.Background(), "system prompt", "USER: why did sshd fail?")
+	result, err := client.Controller(context.Background(), "system prompt", "USER: why did sshd fail?", nil)
 	require.NoError(t, err)
 
 	assert.Empty(t, result.Response.Reasoning,
-		"a turn with no reasoning output item leaves the summary empty for the thinking fallback")
+		"a turn that streamed no reasoning-summary delta leaves the summary empty for the thinking fallback")
 
 	transport.AssertExpectations(t)
 }
@@ -283,7 +329,7 @@ func TestControllerSurfacesModelNotFoundWithNoFallback(t *testing.T) {
 
 	client := newControllerClient(t, transport)
 
-	result, err := client.Controller(context.Background(), "system prompt", "USER: why did sshd fail?")
+	result, err := client.Controller(context.Background(), "system prompt", "USER: why did sshd fail?", nil)
 	require.Error(t, err)
 
 	assert.Equal(t, openai.ControllerResult{
@@ -331,12 +377,12 @@ func captureControllerRequest(t *testing.T, instructions, input string) []byte {
 			Thinking: "done",
 			Code:     "",
 			Done:     true,
-		}, 10, 10), nil).
+		}), nil).
 		Once()
 
 	client := newControllerClient(t, transport)
 
-	_, err := client.Controller(context.Background(), instructions, input)
+	_, err := client.Controller(context.Background(), instructions, input, nil)
 	require.NoError(t, err)
 
 	transport.AssertExpectations(t)
@@ -345,7 +391,7 @@ func captureControllerRequest(t *testing.T, instructions, input string) []byte {
 	return body
 }
 
-func TestControllerRequestSendsModelTokenCapAndStrictSchema(t *testing.T) {
+func TestControllerRequestSendsModelEffortAndStrictSchema(t *testing.T) {
 	t.Parallel()
 
 	const (
@@ -366,38 +412,44 @@ func TestControllerRequestSendsModelTokenCapAndStrictSchema(t *testing.T) {
 				Strict bool   `json:"strict"`
 			} `json:"format"`
 		} `json:"text"`
-		MaxOutputTokens int `json:"max_output_tokens"`
+		MaxOutputTokens int  `json:"max_output_tokens"`
+		Stream          bool `json:"stream"`
 	}
 
 	require.NoError(t, json.Unmarshal(body, &payload))
 
 	assert.Equal(t, openai.Model, payload.Model, "the controller turn runs on the flagship model")
-	assert.Equal(t, 4096, payload.MaxOutputTokens, "the turn caps output at the reasoning-aware 4096-token budget")
+	assert.True(t, payload.Stream, "the controller turn streams its reply")
+	assert.Zero(t, payload.MaxOutputTokens, "output is unbounded — no max_output_tokens cap is sent")
 	assert.Equal(t, instructions, payload.Instructions, "the §14 system prompt is sent as instructions")
 	assert.Equal(t, input, payload.Input, "the §6 rendered history is sent as input")
 	assert.Equal(t, "json_schema", payload.Text.Format.Type, "the reply is constrained by a json_schema format")
 	assert.Equal(t, "controller_response", payload.Text.Format.Name, "the structured-output schema is named")
 	assert.True(t, payload.Text.Format.Strict, "strict structured-output adherence is enabled")
 
-	// The turn must ask gpt-5.5 for a reasoning summary so the loop can render that
-	// prose as the turn's thinking. Decoded separately to keep the request-shape
-	// struct above unchanged.
+	// The turn reasons at maximum effort (xhigh) — it is the investigation brain — while
+	// still asking for an auto reasoning summary so the loop can render that prose as the
+	// turn's live thinking. Decoded separately to keep the request-shape struct above
+	// unchanged.
 	var reasoning struct {
 		Reasoning struct {
+			Effort  string `json:"effort"`
 			Summary string `json:"summary"`
 		} `json:"reasoning"`
 	}
 
 	require.NoError(t, json.Unmarshal(body, &reasoning))
+	assert.Equal(t, "xhigh", reasoning.Reasoning.Effort,
+		"the controller turn reasons at maximum effort")
 	assert.Equal(t, "auto", reasoning.Reasoning.Summary,
 		"the turn asks gpt-5.5 for an auto reasoning summary to render as the turn's thinking")
 }
 
-func TestControllerDecodesAnswerSplitAcrossTwoMessages(t *testing.T) {
+func TestControllerDecodesAnswerSplitAcrossTwoDeltas(t *testing.T) {
 	t.Parallel()
 
-	// gpt-5.5 occasionally returns the structured answer as more than one output
-	// message item. resp.OutputText concatenates them, so the decoder sees
+	// gpt-5.5 occasionally streams the structured answer as more than one
+	// output_text run. streamResponses accumulates the deltas, so the decoder sees
 	// "{...}{...}" — which a plain json.Unmarshal rejects as trailing data with
 	// "invalid character '{' after top-level value". The controller must still
 	// decode the first (authoritative) object and resolve the turn.
@@ -410,27 +462,15 @@ func TestControllerDecodesAnswerSplitAcrossTwoMessages(t *testing.T) {
 	inner, err := json.Marshal(reply)
 	require.NoError(t, err)
 
-	object, err := json.Marshal(string(inner))
-	require.NoError(t, err)
-
-	message := func(id string) string {
-		return `{"id":"msg_` + id + `","type":"message","role":"assistant","status":"completed",` +
-			`"content":[{"type":"output_text","text":` + string(object) + `,"annotations":[]}]}`
-	}
-	doubled := `{"id":"resp_test","object":"response","created_at":1,"status":"completed",` +
-		`"model":"` + openai.Model + `","output":[` + message("a") + `,` + message("b") + `],` +
-		`"usage":{"input_tokens":12,"output_tokens":8,"total_tokens":20,` +
-		`"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":0}}}`
-
 	transport := new(mockTransport)
 	transport.
 		On("RoundTrip", mock.Anything).
-		Return(http.StatusOK, doubled, nil).
+		Return(http.StatusOK, completedStream(t, string(inner), string(inner)), nil).
 		Once()
 
 	client := newControllerClient(t, transport)
 
-	result, err := client.Controller(context.Background(), "system prompt", "USER: why did sshd fail?")
+	result, err := client.Controller(context.Background(), "system prompt", "USER: why did sshd fail?", nil)
 	require.NoError(t, err, "two concatenated objects must not fail the turn")
 
 	assert.Equal(t, reply, result.Response, "the first of the two concatenated objects is the decoded answer")
@@ -439,87 +479,63 @@ func TestControllerDecodesAnswerSplitAcrossTwoMessages(t *testing.T) {
 	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
 }
 
-func TestControllerSurfacesIncompleteTruncationError(t *testing.T) {
-	t.Parallel()
-
-	// A turn whose reply does not fit in max_output_tokens comes back with status
-	// "incomplete" and a partial output_text. The controller must detect the
-	// truncation and surface controller_incomplete, rather than letting the partial
-	// JSON decode to a cryptic "unexpected EOF".
-	incompleteBody := `{"id":"resp_test","object":"response","created_at":1,"status":"incomplete",` +
-		`"incomplete_details":{"reason":"max_output_tokens"},"model":"` + openai.Model + `",` +
-		`"output":[{"id":"msg_test","type":"message","role":"assistant","status":"incomplete",` +
-		`"content":[{"type":"output_text","text":"{\"thinking\":\"inspect the failed","annotations":[]}]}],` +
-		`"usage":{"input_tokens":1875,"output_tokens":4096,"total_tokens":5971,` +
-		`"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":3500}}}`
+// assertControllerTurnFails drives one Controller call whose streamed response is
+// streamBody and asserts the turn fails with the zero result under wantCode. The
+// controller's truncation (controller_incomplete) and decode (controller_decode)
+// failure paths share this exact shape, so it lives in one helper and each path's
+// test states only the stream body and code that make it distinct.
+func assertControllerTurnFails(t *testing.T, streamBody, wantCode string) {
+	t.Helper()
 
 	transport := new(mockTransport)
 	transport.
 		On("RoundTrip", mock.Anything).
-		Return(http.StatusOK, incompleteBody, nil).
+		Return(http.StatusOK, streamBody, nil).
 		Once()
 
 	client := newControllerClient(t, transport)
 
-	result, err := client.Controller(context.Background(), "system prompt", "USER: why did sshd fail?")
+	result, err := client.Controller(context.Background(), "system prompt", "USER: why did sshd fail?", nil)
 	require.Error(t, err)
 
 	assert.Equal(t, openai.ControllerResult{
 		Response: openai.ControllerResponse{Thinking: "", Code: "", Done: false},
-	}, result, "a truncated turn yields the zero result")
+	}, result, "a failed turn yields the zero result")
 
 	oopsErr, ok := oops.AsOops(err)
 	require.True(t, ok, "the error is oops-wrapped")
 	assert.Equal(t, "openai", oopsErr.Domain())
-	assert.Equal(t, "controller_incomplete", oopsErr.Code(),
-		"an incomplete/truncated reply surfaces as controller_incomplete, not a decode error")
+	assert.Equal(t, wantCode, oopsErr.Code())
 
 	transport.AssertExpectations(t)
 	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
+}
+
+func TestControllerSurfacesIncompleteTruncationError(t *testing.T) {
+	t.Parallel()
+
+	// A turn whose reply does not fit in max_output_tokens ends with a terminal
+	// response.incomplete event carrying a partial output_text; the controller must
+	// surface controller_incomplete rather than let the partial JSON decode to a
+	// cryptic "unexpected EOF".
+	assertControllerTurnFails(t, incompleteStream(t, `{"thinking":"inspect the failed`), "controller_incomplete")
 }
 
 func TestControllerSurfacesMalformedReplyAsDecodeError(t *testing.T) {
 	t.Parallel()
 
-	const malformedBody = `{"id":"resp_test","object":"response","created_at":1,"status":"completed",` +
-		`"model":"gpt-5.5","output":[{"id":"msg_test","type":"message","role":"assistant",` +
-		`"status":"completed","content":[{"type":"output_text","text":"not json at all","annotations":[]}]}],` +
-		`"usage":{"input_tokens":5,"output_tokens":5,"total_tokens":10,` +
-		`"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":0}}}`
-
-	transport := new(mockTransport)
-	transport.
-		On("RoundTrip", mock.Anything).
-		Return(http.StatusOK, malformedBody, nil).
-		Once()
-
-	client := newControllerClient(t, transport)
-
-	result, err := client.Controller(context.Background(), "system prompt", "USER: why did sshd fail?")
-	require.Error(t, err)
-
-	assert.Equal(t, openai.ControllerResult{
-		Response: openai.ControllerResponse{Thinking: "", Code: "", Done: false},
-	}, result, "a malformed model reply yields the zero result")
-
-	oopsErr, ok := oops.AsOops(err)
-	require.True(t, ok, "the error is oops-wrapped")
-	assert.Equal(t, "openai", oopsErr.Domain())
-	assert.Equal(t, "controller_decode", oopsErr.Code(),
-		"a non-JSON output_text surfaces as an openai-domain decode error")
-
-	transport.AssertExpectations(t)
-	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
+	// A completed reply whose accumulated output_text is not JSON at all surfaces as
+	// an openai-domain controller_decode failure.
+	assertControllerTurnFails(t, completedStream(t, "not json at all"), "controller_decode")
 }
 
 func TestControllerSurfacesTrailingGarbageAsDecodeError(t *testing.T) {
 	t.Parallel()
 
-	// A well-formed structured object followed by junk ("{...}garbage") must not
-	// slip through: json.Decoder.Decode reads only the first value and would leave
-	// the trailing bytes unread, so the decoder has to drain the rest and reject
-	// the non-JSON suffix as a controller_decode failure rather than letting a
-	// half-valid reply reach the loop.
+	// A well-formed structured object followed by junk ("{...}garbage") must not slip
+	// through: the decoder reads the first value, then drains the rest and rejects the
+	// non-JSON suffix as controller_decode rather than letting a half-valid reply reach
+	// the loop.
 	reply := openai.ControllerResponse{
 		Thinking: "inspect the failed unit before concluding",
 		Code:     "boots := journal.Boots()",
@@ -529,36 +545,5 @@ func TestControllerSurfacesTrailingGarbageAsDecodeError(t *testing.T) {
 	inner, err := json.Marshal(reply)
 	require.NoError(t, err)
 
-	object, err := json.Marshal(string(inner) + " not json at all")
-	require.NoError(t, err)
-
-	trailingBody := `{"id":"resp_test","object":"response","created_at":1,"status":"completed",` +
-		`"model":"` + openai.Model + `","output":[{"id":"msg_test","type":"message","role":"assistant",` +
-		`"status":"completed","content":[{"type":"output_text","text":` + string(object) + `,"annotations":[]}]}],` +
-		`"usage":{"input_tokens":5,"output_tokens":5,"total_tokens":10,` +
-		`"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":0}}}`
-
-	transport := new(mockTransport)
-	transport.
-		On("RoundTrip", mock.Anything).
-		Return(http.StatusOK, trailingBody, nil).
-		Once()
-
-	client := newControllerClient(t, transport)
-
-	result, err := client.Controller(context.Background(), "system prompt", "USER: why did sshd fail?")
-	require.Error(t, err, "trailing garbage after the first object must fail the turn")
-
-	assert.Equal(t, openai.ControllerResult{
-		Response: openai.ControllerResponse{Thinking: "", Code: "", Done: false},
-	}, result, "a reply with trailing garbage yields the zero result")
-
-	oopsErr, ok := oops.AsOops(err)
-	require.True(t, ok, "the error is oops-wrapped")
-	assert.Equal(t, "openai", oopsErr.Domain())
-	assert.Equal(t, "controller_decode", oopsErr.Code(),
-		"trailing non-JSON content surfaces as an openai-domain decode error")
-
-	transport.AssertExpectations(t)
-	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
+	assertControllerTurnFails(t, completedStream(t, string(inner)+" not json at all"), "controller_decode")
 }

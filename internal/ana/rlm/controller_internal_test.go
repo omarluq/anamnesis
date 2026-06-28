@@ -1,7 +1,6 @@
 package rlm
 
 import (
-	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -87,21 +86,19 @@ func TestThinkingTraceFallsBackToThinkingFieldWhenNoSummary(t *testing.T) {
 		"an empty reasoning summary falls back to the brief structured thinking field")
 }
 
-func TestCodeOutputLeadsWithErrorThenStdoutThenRetval(t *testing.T) {
+func TestCodeOutputJoinsStdoutThenRetval(t *testing.T) {
 	t.Parallel()
 
-	// A turn that printed, returned a value, and then errored renders all three for
-	// the code block: the error first so a failed turn shows what went wrong, then the
-	// trailing-newline-trimmed stdout, then the final expression's value.
+	// The code block's output is the trailing-newline-trimmed stdout followed by the
+	// final expression's value. An evaluation error is NOT folded in — it travels
+	// separately as CodeEnd's errText so a failed turn renders red.
 	result := repl.Result{
 		Retval: reflect.ValueOf(42),
 		Stdout: "scanning boots\n",
 		Stderr: "",
 	}
 
-	output := codeOutput(result, errors.New("boom"))
-
-	assert.Equal(t, "error: boom\nscanning boots\n42", output)
+	assert.Equal(t, "scanning boots\n42", codeOutput(result))
 }
 
 func TestCodeOutputOmitsEmptySections(t *testing.T) {
@@ -115,7 +112,7 @@ func TestCodeOutputOmitsEmptySections(t *testing.T) {
 		Stderr: "",
 	}
 
-	assert.Equal(t, "only stdout", codeOutput(result, nil))
-	assert.Empty(t, codeOutput(repl.Result{Retval: reflect.Value{}, Stdout: "", Stderr: ""}, nil),
+	assert.Equal(t, "only stdout", codeOutput(result))
+	assert.Empty(t, codeOutput(repl.Result{Retval: reflect.Value{}, Stdout: "", Stderr: ""}),
 		"a turn that printed nothing and returned nothing renders an empty block")
 }

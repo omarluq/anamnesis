@@ -34,10 +34,14 @@ type mockControllerLLM struct {
 }
 
 // Respond records its arguments and replays the response scripted via
-// .On("Respond", ...).Return(resp, err).
+// .On("Respond", ...).Return(resp, err). The onReasoning streaming callback is
+// accepted to satisfy the ControllerLLM seam but deliberately left out of the
+// m.Called matcher, so existing four-argument .On("Respond", ...) expectations keep
+// matching; tests that need to exercise the streaming path invoke it explicitly.
 func (m *mockControllerLLM) Respond(
 	ctx context.Context,
 	systemPrompt, question, history string,
+	_ func(string),
 ) (openai.ControllerResponse, error) {
 	args := m.Called(ctx, systemPrompt, question, history)
 
@@ -202,7 +206,7 @@ func TestSessionDrivesModelCollaborators(t *testing.T) {
 		Return("", nil).
 		Once()
 
-	resp, err := fixture.session.Controller.Respond(ctx, fixtureSystemPrompt, fixtureQuestion, "history")
+	resp, err := fixture.session.Controller.Respond(ctx, fixtureSystemPrompt, fixtureQuestion, "history", nil)
 	require.NoError(t, err)
 	assert.Equal(t, want, resp)
 

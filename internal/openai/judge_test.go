@@ -3,7 +3,6 @@ package openai_test
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"testing"
@@ -16,29 +15,18 @@ import (
 	"github.com/omarluq/anamnesis/internal/openai"
 )
 
-// judgeResponseBody renders a Responses API success envelope whose output text is
-// verdict marshaled to JSON (the structured reply the judge model emits) and whose
-// usage block reports the given token counts, so a test can drive Judge end to end
-// through the mock transport. The verdict is double-encoded — once to the JSON
-// object the model returns, then again so it embeds as the string-valued output
-// text field — mirroring how the API ships structured output.
-func judgeResponseBody(t *testing.T, verdict openai.JudgeVerdict, tokensIn, tokensOut int) string {
+// judgeResponseBody renders a Responses SSE stream whose output_text delta carries
+// verdict marshaled to JSON (the structured reply the judge model emits), terminated
+// by a response.completed event, so a test can drive Judge end to end through the
+// streaming transport. It reuses the shared completedStream builder so every role's
+// success body shares one SSE shape.
+func judgeResponseBody(t *testing.T, verdict openai.JudgeVerdict) string {
 	t.Helper()
 
 	inner, err := json.Marshal(verdict)
 	require.NoError(t, err)
 
-	text, err := json.Marshal(string(inner))
-	require.NoError(t, err)
-
-	return fmt.Sprintf(
-		`{"id":"resp_judge","object":"response","created_at":1,"status":"completed",`+
-			`"model":%q,"output":[{"id":"msg_judge","type":"message","role":"assistant",`+
-			`"status":"completed","content":[{"type":"output_text","text":%s,"annotations":[]}]}],`+
-			`"usage":{"input_tokens":%d,"output_tokens":%d,"total_tokens":%d,`+
-			`"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":0}}}`,
-		openai.Model, string(text), tokensIn, tokensOut, tokensIn+tokensOut,
-	)
+	return completedStream(t, string(inner))
 }
 
 // captureJudgeRequest drives one Judge call through a mock transport that records
@@ -62,7 +50,7 @@ func captureJudgeRequest(t *testing.T, question, answer string, citations []stri
 
 			body = raw
 		}).
-		Return(http.StatusOK, judgeResponseBody(t, openai.JudgeVerdict{Approve: true, Critique: ""}, 10, 10), nil).
+		Return(http.StatusOK, judgeResponseBody(t, openai.JudgeVerdict{Approve: true, Critique: ""}), nil).
 		Once()
 
 	client := newControllerClient(t, transport)
@@ -87,7 +75,7 @@ func TestJudgeReturnsCritiqueVerdict(t *testing.T) {
 	transport := new(mockTransport)
 	transport.
 		On("RoundTrip", mock.Anything).
-		Return(http.StatusOK, judgeResponseBody(t, verdict, 845, 37), nil).
+		Return(http.StatusOK, judgeResponseBody(t, verdict), nil).
 		Once()
 
 	client := newControllerClient(t, transport)
@@ -116,7 +104,7 @@ func TestJudgeApprovesWithEmptyCritique(t *testing.T) {
 	transport := new(mockTransport)
 	transport.
 		On("RoundTrip", mock.Anything).
-		Return(http.StatusOK, judgeResponseBody(t, verdict, 612, 5), nil).
+		Return(http.StatusOK, judgeResponseBody(t, verdict), nil).
 		Once()
 
 	client := newControllerClient(t, transport)
@@ -182,7 +170,7 @@ func TestJudgeHandlesAnswerWithNoCitations(t *testing.T) {
 	transport := new(mockTransport)
 	transport.
 		On("RoundTrip", mock.Anything).
-		Return(http.StatusOK, judgeResponseBody(t, verdict, 300, 21), nil).
+		Return(http.StatusOK, judgeResponseBody(t, verdict), nil).
 		Once()
 
 	client := newControllerClient(t, transport)
@@ -237,22 +225,50 @@ func TestJudgeSurfacesCallFailure(t *testing.T) {
 	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
 }
 
-func TestJudgeSurfacesDecodeFailure(t *testing.T) {
+func TestJudgeSurfacesIncompleteTruncationError(t *testing.T) {
 	t.Parallel()
 
-	malformedBody := fmt.Sprintf(
-		`{"id":"resp_judge","object":"response","created_at":1,"status":"completed",`+
-			`"model":%q,"output":[{"id":"msg_judge","type":"message","role":"assistant",`+
-			`"status":"completed","content":[{"type":"output_text","text":%q,"annotations":[]}]}],`+
-			`"usage":{"input_tokens":10,"output_tokens":2,"total_tokens":12,`+
-			`"input_tokens_details":{"cached_tokens":0},"output_tokens_details":{"reasoning_tokens":0}}}`,
-		openai.Model, "this is prose, not a JudgeVerdict JSON object",
+	// The EOF bug: gpt-5.5's hidden reasoning draws from the judge's output budget, so
+	// a verdict could truncate before its JSON closed and decode to a cryptic
+	// "unexpected EOF". The judge had no incomplete guard. Streaming adds the shared
+	// guard, so a terminal response.incomplete now surfaces as judge_incomplete.
+	transport := new(mockTransport)
+	transport.
+		On("RoundTrip", mock.Anything).
+		Return(http.StatusOK, incompleteStream(t, `{"approve":fal`), nil).
+		Once()
+
+	client := newControllerClient(t, transport)
+
+	result, err := client.Judge(
+		context.Background(),
+		"Why did nginx fail to start?",
+		"nginx died because its configuration was invalid.",
+		[]string{"nginx.service: invalid configuration directive"},
 	)
+	require.Error(t, err)
+
+	assert.Equal(t, openai.JudgeResult{
+		Verdict: openai.JudgeVerdict{Approve: false, Critique: ""},
+	}, result, "a truncated verdict yields the zero result")
+
+	oopsErr, ok := oops.AsOops(err)
+	require.True(t, ok, "the error is oops-wrapped")
+	assert.Equal(t, "openai", oopsErr.Domain())
+	assert.Equal(t, "judge_incomplete", oopsErr.Code(),
+		"a truncated verdict surfaces as judge_incomplete, not a cryptic decode EOF")
+
+	transport.AssertExpectations(t)
+	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
+}
+
+func TestJudgeSurfacesDecodeFailure(t *testing.T) {
+	t.Parallel()
 
 	transport := new(mockTransport)
 	transport.
 		On("RoundTrip", mock.Anything).
-		Return(http.StatusOK, malformedBody, nil).
+		Return(http.StatusOK, completedStream(t, "this is prose, not a JudgeVerdict JSON object"), nil).
 		Once()
 
 	client := newControllerClient(t, transport)

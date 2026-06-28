@@ -26,12 +26,14 @@ func TestTraceEventCarriesEveryField(t *testing.T) {
 	event := TraceEvent{
 		Kind:  TraceKindQueryStart,
 		Text:  "summarize the panic backtrace",
+		Err:   "syntax error: unexpected EOF",
 		Depth: 2,
 		RunID: 42,
 	}
 
 	assert.Equal(t, TraceKindQueryStart, event.Kind)
 	assert.Equal(t, "summarize the panic backtrace", event.Text)
+	assert.Equal(t, "syntax error: unexpected EOF", event.Err)
 	assert.Equal(t, 2, event.Depth)
 	assert.Equal(t, uint64(42), event.RunID)
 }

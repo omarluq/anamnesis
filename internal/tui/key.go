@@ -90,6 +90,8 @@ func specialKeyName(key tcell.Key) (string, bool) {
 		tcell.KeyDown:       "down",
 		tcell.KeyHome:       "home",
 		tcell.KeyEnd:        "end",
+		tcell.KeyPgUp:       "pageup",
+		tcell.KeyPgDn:       "pagedown",
 		tcell.KeyCtrlA:      "ctrl+a",
 		tcell.KeyCtrlB:      "ctrl+b",
 		tcell.KeyCtrlC:      "ctrl+c",

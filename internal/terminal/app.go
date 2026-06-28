@@ -24,6 +24,12 @@ const (
 	spinnerInterval = 120 * time.Millisecond
 
 	defaultTitle = "anamnesis"
+
+	// transcriptScrollPage is the number of lines a PageUp/PageDown lifts or lowers
+	// the transcript window.
+	transcriptScrollPage = 5
+	// transcriptWheelStep is the number of lines one mouse-wheel notch scrolls.
+	transcriptWheelStep = 2
 )
 
 // spinnerFrames is the immutable braille spinner rune cycle shown while a run is
@@ -59,6 +65,7 @@ type App struct {
 	caretRow     int
 	runID        uint64
 	spinnerFrame int
+	scroll       int // Lines lifted above the bottom; 0 pins the transcript to the tail.
 
 	caretVisible  bool
 	toolsExpanded bool
@@ -85,6 +92,7 @@ func newApp(screen tcell.Screen, opts RunOptions) *App {
 		caretRow:      0,
 		runID:         0,
 		spinnerFrame:  0,
+		scroll:        0,
 		caretVisible:  false,
 		toolsExpanded: false,
 		dirty:         false,
@@ -103,6 +111,8 @@ func Run(ctx context.Context, opts RunOptions) error {
 	if initErr := screen.Init(); initErr != nil {
 		return oops.In("terminal").Code("screen_init").Wrapf(initErr, "init screen")
 	}
+
+	screen.EnableMouse()
 
 	defer screen.Fini()
 
@@ -172,22 +182,27 @@ func (app *App) handleTrace(event TraceEvent, ok bool) {
 	}
 }
 
-// applyTrace translates a trace event into a transcript mutation: thinking turns,
-// code starts, and query starts mark the loop busy and append their blocks; a code
-// end and a query end complete their pending blocks; and a final answer clears the
-// busy state and appends the assistant markdown.
+// applyTrace translates a trace event into a transcript mutation: thinking deltas
+// stream into a live thinking block and the final thinking settles it; code starts
+// and query starts mark the loop busy and append their blocks; a code end and a
+// query end complete their pending blocks; and a final answer clears the busy state
+// and appends the assistant markdown.
 func (app *App) applyTrace(event TraceEvent) {
 	switch event.Kind {
+	case TraceKindThinkingDelta:
+		app.working = true
+
+		app.appendThinkingDelta(event.Text)
 	case TraceKindThinking:
 		app.working = true
 
-		app.appendThinking(event.Text)
+		app.settleThinking(event.Text)
 	case TraceKindCodeStart:
 		app.working = true
 
 		app.appendCodeStart(event.Text)
 	case TraceKindCodeEnd:
-		app.completeCode(event.Text)
+		app.completeCode(event.Text, event.Err)
 	case TraceKindQueryStart:
 		app.working = true
 
@@ -232,14 +247,35 @@ func (app *App) renderFrame(frame *tui.CellBuffer, width, height int) {
 	app.drawFooter(frame, tui.Rect{X: 0, Y: height - footerHeight, Width: width, Height: footerHeight})
 }
 
-// drawTranscript renders the message history (or the welcome line) bottom-anchored
-// into rect.
+// drawTranscript renders the message history (or the welcome line) into rect,
+// bottom-anchored and lifted by app.scroll lines. The offset is re-clamped against
+// the current rendered-line count every frame so it stays valid as block heights
+// change (pending→settled, ctrl+o expansion, resize); at scroll 0 the window is the
+// last rect.Height lines, preserving the previous tail-follow behavior.
 func (app *App) drawTranscript(frame *tui.CellBuffer, rect tui.Rect) {
 	if rect.Empty() {
 		return
 	}
 
-	tui.DrawLines(frame, rect, tui.Tail(app.transcriptLines(rect.Width), rect.Height))
+	lines := app.transcriptLines(rect.Width)
+	app.scroll = min(max(0, app.scroll), max(0, len(lines)-rect.Height))
+	top := len(lines) - rect.Height - app.scroll
+
+	tui.DrawLines(frame, rect, tui.SliceViewport(lines, top, rect.Height))
+}
+
+// scrollBy lifts the transcript window by delta lines (positive scrolls up toward
+// older history, negative back toward the tail), pinning the bottom at zero. The
+// top is capped by the per-frame clamp in drawTranscript, so delta may overshoot.
+func (app *App) scrollBy(delta int) {
+	app.scroll = max(0, app.scroll+delta)
+	app.dirty = true
+}
+
+// scrollToBottom snaps the transcript back to follow mode so the newest line shows.
+func (app *App) scrollToBottom() {
+	app.scroll = 0
+	app.dirty = true
 }
 
 // transcriptLines renders every history message into one stacked line slice, or
@@ -308,8 +344,26 @@ func (app *App) handleEvent(ctx context.Context, event tcell.Event) bool {
 		return false
 	case *tcell.EventKey:
 		return app.handleKey(ctx, typed)
+	case *tcell.EventMouse:
+		app.handleMouse(typed)
+
+		return false
 	default:
 		return false
+	}
+}
+
+// handleMouse maps mouse-wheel motion onto transcript scrolling: a wheel up lifts
+// the window toward older history, a wheel down lowers it back toward the tail, and
+// other buttons are ignored.
+func (app *App) handleMouse(event *tcell.EventMouse) {
+	buttons := event.Buttons()
+
+	switch {
+	case buttons&tcell.WheelUp != 0:
+		app.scrollBy(transcriptWheelStep)
+	case buttons&tcell.WheelDown != 0:
+		app.scrollBy(-transcriptWheelStep)
 	}
 }
 
@@ -329,11 +383,36 @@ func (app *App) handleKey(ctx context.Context, event *tcell.EventKey) bool {
 		return false
 	}
 
+	if app.handleScroll(keyEvent) {
+		return false
+	}
+
 	if query := app.composerKey(keyEvent); query != "" {
 		app.startRun(ctx, query)
 	}
 
 	return false
+}
+
+// handleScroll maps the transcript scroll keys onto the scroll offset and reports
+// whether it consumed the key: PageUp/PageDown jump a page, the up/down arrows nudge
+// one line, and any other key falls through to the composer. The arrows are free to
+// repurpose because the single-line-aware composer never consumes them.
+func (app *App) handleScroll(keyEvent tui.KeyEvent) bool {
+	switch keyEvent.Key {
+	case "pageup":
+		app.scrollBy(transcriptScrollPage)
+	case "pagedown":
+		app.scrollBy(-transcriptScrollPage)
+	case "up":
+		app.scrollBy(1)
+	case "down":
+		app.scrollBy(-1)
+	default:
+		return false
+	}
+
+	return true
 }
 
 // isQuitKey reports whether keyEvent should terminate the shell.
@@ -388,6 +467,8 @@ func (app *App) submit() string {
 	if app.working {
 		return ""
 	}
+
+	app.scrollToBottom()
 
 	return app.appendUser(app.composer.Clear())
 }

@@ -32,10 +32,10 @@ func TestEmitter(t *testing.T) {
 	}
 
 	want := []terminal.TraceEvent{
-		{Kind: terminal.TraceKindThinking, Text: "planning", Depth: 0, RunID: runID},
-		{Kind: terminal.TraceKindQueryStart, Text: "fan out boot 3", Depth: 1, RunID: runID},
-		{Kind: terminal.TraceKindQueryEnd, Text: "boot 3 oom-killed checkout-api", Depth: 1, RunID: runID},
-		{Kind: terminal.TraceKindFinal, Text: "root cause: oom-kill", Depth: 0, RunID: runID},
+		{Kind: terminal.TraceKindThinking, Text: "planning", Err: "", Depth: 0, RunID: runID},
+		{Kind: terminal.TraceKindQueryStart, Text: "fan out boot 3", Err: "", Depth: 1, RunID: runID},
+		{Kind: terminal.TraceKindQueryEnd, Text: "boot 3 oom-killed checkout-api", Err: "", Depth: 1, RunID: runID},
+		{Kind: terminal.TraceKindFinal, Text: "root cause: oom-kill", Err: "", Depth: 0, RunID: runID},
 	}
 
 	require.Len(t, got, len(want))

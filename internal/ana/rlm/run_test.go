@@ -285,7 +285,7 @@ func assertTraceSequence(
 			codeEnds++
 		case terminal.TraceKindQueryStart, terminal.TraceKindQueryEnd:
 			assert.Equal(t, 0, event.Depth, "the root sub-call carries its node depth")
-		case terminal.TraceKindThinking, terminal.TraceKindFinal:
+		case terminal.TraceKindThinkingDelta, terminal.TraceKindThinking, terminal.TraceKindFinal:
 		}
 
 		if cursor < len(want) && event.Kind == want[cursor].kind && event.Text == want[cursor].text {

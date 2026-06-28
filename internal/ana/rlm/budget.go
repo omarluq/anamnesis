@@ -11,15 +11,15 @@ import (
 
 // Hard limits seeded from SPEC §6 and §18; enforced in code, not in the prompt.
 const (
-	defaultMaxTurns    = 12
+	defaultMaxTurns    = 30
 	defaultMaxDepth    = 3
-	defaultMaxSubCalls = 30
+	defaultMaxSubCalls = 60
 	// defaultWallTimeout is the hard wall-clock backstop for a whole investigation.
-	// gpt-5.5 is a reasoning model whose turns each take tens of seconds, so a
-	// multi-turn investigation needs far more than the original 120s (which tripped
-	// "context deadline exceeded" mid-run); the 12-turn and 30-sub-call budgets are
-	// the real bound, with this as the outer cap.
-	defaultWallTimeout = 600 * time.Second
+	// gpt-5.5 reasons at maximum effort with unbounded output, so each turn can take
+	// a minute or more; a thorough multi-turn investigation needs generous headroom,
+	// so this is sized at 30 minutes. The 30-turn and 60-sub-call budgets are the real
+	// bound, with this as the outer cap that prevents a wedged run from hanging forever.
+	defaultWallTimeout = 1800 * time.Second
 )
 
 // Distinct budget sentinels; each carries its own machine-readable oops code.

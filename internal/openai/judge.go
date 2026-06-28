@@ -8,15 +8,7 @@ import (
 	openaisdk "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/responses"
 	"github.com/samber/lo"
-	"github.com/samber/oops"
 )
-
-// maxJudgeOutputTokens caps the judge pass's output. The verdict is a small
-// structured reply — an approve flag plus at most a 1-3 sentence critique per
-// SPEC §16 — so this ceiling bounds cost without ever truncating a well-formed
-// verdict. There is no §6 budget row for the judge because it runs once per
-// session and emits far less than a controller turn.
-const maxJudgeOutputTokens = 500
 
 // judgeSchemaName names the structured-output schema sent to the Responses API
 // for the judge pass. It is restricted to the [A-Za-z0-9_-] characters the API
@@ -95,21 +87,24 @@ func (client *Client) Judge(
 
 	input := buildJudgeInput(question, answer, citations)
 
-	resp, err := client.api.Responses.New(ctx, responses.ResponseNewParams{
-		Model:           Model,
-		Instructions:    openaisdk.String(judgeSystemPrompt),
-		MaxOutputTokens: openaisdk.Int(maxJudgeOutputTokens),
-		Input:           responses.ResponseNewParamsInputUnion{OfString: openaisdk.String(input)},
-		Text:            responses.ResponseTextConfigParam{Format: format},
-	})
+	// Stream the pass so the shared truncation guard applies — this is the EOF bug
+	// fix: the judge previously had no incomplete guard, so a verdict the model could
+	// not finish decoded to a cryptic "unexpected EOF" instead of an actionable error.
+	// Now it surfaces as judge_incomplete. Output is unbounded (no MaxOutputTokens) and
+	// reasoning runs at maximum effort so the audit scrutinizes the answer against its
+	// citations as hard as it can; no reasoning summary is requested.
+	output, _, err := client.streamResponses(ctx, &responses.ResponseNewParams{
+		Model:        Model,
+		Instructions: openaisdk.String(judgeSystemPrompt),
+		Input:        responses.ResponseNewParamsInputUnion{OfString: openaisdk.String(input)},
+		Text:         responses.ResponseTextConfigParam{Format: format},
+		Reasoning:    responses.ReasoningParam{Effort: responses.ReasoningEffortXhigh},
+	}, nil, "judge")
 	if err != nil {
-		return failedJudgePass(oops.
-			In("openai").
-			Code("judge_call_failed").
-			Wrapf(err, "judge responses call on model %s", Model))
+		return failedJudgePass(err)
 	}
 
-	parsed, err := decodeStructured[JudgeVerdict](resp.OutputText(), "judge_decode")
+	parsed, err := decodeStructured[JudgeVerdict](output, "judge_decode")
 	if err != nil {
 		return failedJudgePass(err)
 	}

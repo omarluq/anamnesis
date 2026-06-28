@@ -87,8 +87,8 @@ func (deps *Deps) validate() error {
 // wires the root mvm REPL session over the host surfaces with a visibility-
 // recording journal and the recursive sub-call adapter, frames the controller with
 // the SPEC §14 system prompt, and drives the audited turn loop under the §6 hard
-// budget — a 120-second wall-clock deadline layered onto ctx alongside the
-// twelve-turn cap. agent.Query is genuinely recursive: a sub-call above the leaf
+// budget — the budget's wall-clock deadline (see Budget.WallTimeout) layered onto
+// ctx alongside the twelve-turn cap. agent.Query is genuinely recursive: a sub-call above the leaf
 // level spawns a full child controller loop one level deeper, while the leaf falls
 // back to a flat base-case call, all sharing one budget. It returns the
 // judge-approved final answer, which it also publishes as the terminal trace

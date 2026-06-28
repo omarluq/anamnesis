@@ -12,22 +12,9 @@ import (
 	"github.com/samber/oops"
 )
 
-// maxControllerOutputTokens caps a controller turn's output. gpt-5.5 is a reasoning
-// model whose hidden reasoning tokens draw from this same budget, so the cap must
-// cover reasoning plus the structured reply (thinking + a multi-line Go code block);
-// the former 1500 truncated reasoning turns into a partial reply that decoded to
-// "unexpected EOF". 4096 matches librecode's default output cap. The matching
-// 8000-input budget is the caller's job: it compacts history before the call.
-const maxControllerOutputTokens = 4096
-
 // controllerSchemaName names the structured-output schema sent to the Responses
 // API. It is restricted to the [A-Za-z0-9_-] characters the API allows.
 const controllerSchemaName = "controller_response"
-
-// reasoningOutputItemType is the Type discriminator the Responses API stamps on a
-// reasoning output item, the item whose summary parts carry the turn's reasoning
-// summary prose.
-const reasoningOutputItemType = "reasoning"
 
 // ControllerResult is one controller turn's outcome: the parsed structured reply
 // the model produced, so the loop can act on the next step.
@@ -43,84 +30,55 @@ type ControllerResult struct {
 // request (for example because the key lacks access) the wrapped error surfaces
 // immediately so the caller fails loudly rather than silently downgrading to a
 // weaker model.
-func (client *Client) Controller(ctx context.Context, instructions, input string) (ControllerResult, error) {
+func (client *Client) Controller(
+	ctx context.Context,
+	instructions, input string,
+	onReasoning func(string),
+) (ControllerResult, error) {
 	format, err := structuredFormat[ControllerResponse](controllerSchemaName, "controller_schema")
 	if err != nil {
 		return failedControllerTurn(err)
 	}
 
-	resp, err := client.api.Responses.New(ctx, responses.ResponseNewParams{
-		Model:           Model,
-		Instructions:    openaisdk.String(instructions),
-		MaxOutputTokens: openaisdk.Int(maxControllerOutputTokens),
-		Input:           responses.ResponseNewParamsInputUnion{OfString: openaisdk.String(input)},
-		Text:            responses.ResponseTextConfigParam{Format: format},
-		// Ask gpt-5.5 for a reasoning summary alongside the structured reply. gpt-5.5
-		// already reasons by default (its hidden reasoning tokens draw from the output
-		// budget above), so "auto" surfaces a readable prose summary of that reasoning
-		// in the response's reasoning output item, which renders as the turn's thinking
-		// far better than the terse structured Thinking field.
-		Reasoning: responses.ReasoningParam{Summary: responses.ReasoningSummaryAuto},
-	})
-	if err != nil {
-		return failedControllerTurn(oops.
-			In("openai").
-			Code("controller_call_failed").
-			Wrapf(err, "controller responses call on model %s", Model))
-	}
-
-	// A reply that did not fit in MaxOutputTokens comes back with status "incomplete"
-	// and a partial output_text; decoding that truncated JSON would surface as a
-	// cryptic "unexpected EOF". Detect the truncation up front and report it as an
-	// actionable error (mirrors librecode's Responses finish-reason classification).
-	if resp.Status == responses.ResponseStatusIncomplete {
-		return failedControllerTurn(oops.
-			In("openai").
-			Code("controller_incomplete").
-			Errorf("controller reply truncated (reason %q): too large for max_output_tokens=%d",
-				resp.IncompleteDetails.Reason, maxControllerOutputTokens))
-	}
-
-	parsed, err := decodeStructured[ControllerResponse](resp.OutputText(), "controller_decode")
+	// Stream the turn rather than blocking on one shot: gpt-5.5's reasoning pass can
+	// run long, and streaming both lets the UI render thinking as it arrives (via the
+	// onReasoning seam) and lets streamResponses apply the shared truncation guard. It
+	// surfaces a transport failure as controller_call_failed and a reply the model could
+	// not finish as controller_incomplete, so a truncated turn never reaches the decoder
+	// as a cryptic "unexpected EOF". No MaxOutputTokens is set — output is unbounded
+	// (mirroring librecode's Responses path); the §6 turn and wall-clock budget bound the
+	// loop instead, and the caller compacts the input history.
+	output, reasoning, err := client.streamResponses(ctx, &responses.ResponseNewParams{
+		Model:        Model,
+		Instructions: openaisdk.String(instructions),
+		Input:        responses.ResponseNewParamsInputUnion{OfString: openaisdk.String(input)},
+		Text:         responses.ResponseTextConfigParam{Format: format},
+		// Reason at maximum effort: this is the investigation brain, so let gpt-5.5 think
+		// as hard as it can. Summary:auto surfaces a readable prose summary of that
+		// reasoning, which streamResponses accumulates from the reasoning-summary deltas
+		// and renders as the turn's live thinking.
+		Reasoning: responses.ReasoningParam{
+			Effort:  responses.ReasoningEffortXhigh,
+			Summary: responses.ReasoningSummaryAuto,
+		},
+	}, onReasoning, "controller")
 	if err != nil {
 		return failedControllerTurn(err)
 	}
 
-	// The reasoning summary travels in a separate reasoning output item, not in the
-	// structured output_text the decoder read, so attach it to the parsed reply for
-	// the loop to render as this turn's thinking. It is empty when the model returned
-	// no summary, in which case the caller falls back to the terse Thinking field.
-	parsed.Reasoning = reasoningSummary(resp.Output)
-
-	return ControllerResult{Response: parsed}, nil
-}
-
-// reasoningSummary joins the summary prose from every reasoning output item the
-// Responses API returned for a turn (each holds zero or more summary_text parts),
-// separating parts with a blank line so a multi-section summary reads as
-// paragraphs. It returns the empty string when the response carried no reasoning
-// summary — gpt-5.5 may answer a simple turn without one — so the caller can fall
-// back to the terse structured Thinking field.
-func reasoningSummary(output []responses.ResponseOutputItemUnion) string {
-	// Indexed iteration, not range-by-value or lo: ResponseOutputItemUnion is a
-	// ~3 KB flattened union, so copying one per element (range value or an lo
-	// iteratee param) is the kind of heavy copy gocritic rejects.
-	parts := make([]string, 0, len(output))
-
-	for index := range output {
-		item := &output[index]
-		if item.Type != reasoningOutputItemType {
-			continue
-		}
-
-		for summaryIndex := range item.Summary {
-			if text := strings.TrimSpace(item.Summary[summaryIndex].Text); text != "" {
-				parts = append(parts, text)
-			}
-		}
+	parsed, err := decodeStructured[ControllerResponse](output, "controller_decode")
+	if err != nil {
+		return failedControllerTurn(err)
 	}
 
-	return strings.Join(parts, "\n\n")
+	// The reasoning summary streams in its own reasoning-summary deltas, not in the
+	// structured output_text the decoder read, so attach the accumulated summary to
+	// the parsed reply for the loop to render as this turn's thinking. It is empty
+	// when the model returned no summary, in which case the caller falls back to the
+	// terse structured Thinking field.
+	parsed.Reasoning = reasoning
+
+	return ControllerResult{Response: parsed}, nil
 }
 
 // structuredFormat builds the Responses API structured-output format that
