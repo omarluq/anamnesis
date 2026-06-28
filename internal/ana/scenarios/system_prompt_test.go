@@ -28,9 +28,9 @@ func TestControllerSystemPromptHostSignatures(t *testing.T) {
 
 	signatures := []string{
 		"journal.Boots() []BootInfo",
-		"journal.Query(filter QueryFilter) []Entry",
+		"journal.Query(filter *QueryFilter) []Entry",
 		"journal.Counts(bootID string, byField string) map[string]int",
-		"journal.Unique(field string, filter QueryFilter) []string",
+		"journal.Unique(field string, filter *QueryFilter) []string",
 		"systemd.UnitStatus(name string) UnitStatus",
 		"systemd.ListUnits(state string) []Unit",
 		"agent.Query(prompt string, ctx any) string",
