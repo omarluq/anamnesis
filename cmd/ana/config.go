@@ -120,6 +120,9 @@ func configEntries(cfg *config.Config) []configEntry {
 		{key: "app.env", value: cfg.App.Env},
 		{key: "logging.level", value: cfg.Logging.Level},
 		{key: "logging.format", value: cfg.Logging.Format},
+		{key: "reasoning.controller", value: cfg.Reasoning.Controller},
+		{key: "reasoning.sub", value: cfg.Reasoning.Sub},
+		{key: "reasoning.judge", value: cfg.Reasoning.Judge},
 	}
 }
 

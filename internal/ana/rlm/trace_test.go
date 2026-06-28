@@ -114,6 +114,8 @@ func TestEmitterJudgeLifecycle(t *testing.T) {
 	assert.Equal(t, terminal.TraceKindJudgeEnd, got[1].Kind)
 	assert.Equal(t, "cite the originating boot", got[1].Text)
 	assert.Equal(t, runID, got[1].RunID)
+	assert.Equal(t, 0, got[1].Depth)
+	assert.Equal(t, uint64(0), got[1].QueryID, "a judge event carries no query-correlation id")
 }
 
 // TestEmitterAbandonsBlockedSendOnCancel exercises the cancel-safe send path: a

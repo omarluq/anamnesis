@@ -91,14 +91,15 @@ func (client *Client) Judge(
 	// fix: the judge previously had no incomplete guard, so a verdict the model could
 	// not finish decoded to a cryptic "unexpected EOF" instead of an actionable error.
 	// Now it surfaces as judge_incomplete. Output is unbounded (no MaxOutputTokens) and
-	// reasoning runs at maximum effort so the audit scrutinizes the answer against its
-	// citations as hard as it can; no reasoning summary is requested.
+	// reasoning runs at the client's configured judge effort (default medium) so the
+	// audit scrutinizes the answer against its citations without paying maximum-effort
+	// latency on every session; no reasoning summary is requested.
 	output, _, err := client.streamResponses(ctx, &responses.ResponseNewParams{
 		Model:        Model,
 		Instructions: openaisdk.String(judgeSystemPrompt),
 		Input:        responses.ResponseNewParamsInputUnion{OfString: openaisdk.String(input)},
 		Text:         responses.ResponseTextConfigParam{Format: format},
-		Reasoning:    responses.ReasoningParam{Effort: responses.ReasoningEffortXhigh},
+		Reasoning:    responses.ReasoningParam{Effort: client.judgeEffort},
 	}, nil, "judge")
 	if err != nil {
 		return failedJudgePass(err)

@@ -55,15 +55,16 @@ func (client *Client) Sub(ctx context.Context, prompt, evidence string) (SubResu
 
 	// Stream the call so the shared truncation guard applies: a sub-reply the model
 	// could not finish surfaces as sub_incomplete rather than a silently truncated
-	// answer. Output is unbounded (no MaxOutputTokens) and reasoning runs at maximum
-	// effort so the sub-call reasons as hard as it can over its evidence; no reasoning
-	// summary is requested, and the reasoning deltas are discarded here — only the
-	// controller renders a summary.
+	// answer. Output is unbounded (no MaxOutputTokens) and reasoning runs at the
+	// client's configured sub effort (default low) — sub-calls are bounded, focused
+	// analyses run in volume, so they default cheap; no reasoning summary is
+	// requested, and the reasoning deltas are discarded here — only the controller
+	// renders a summary.
 	output, _, err := client.streamResponses(ctx, &responses.ResponseNewParams{
 		Model:        Model,
 		Instructions: openaisdk.String(subSystemPrompt),
 		Input:        responses.ResponseNewParamsInputUnion{OfString: openaisdk.String(input)},
-		Reasoning:    responses.ReasoningParam{Effort: responses.ReasoningEffortXhigh},
+		Reasoning:    responses.ReasoningParam{Effort: client.subEffort},
 	}, nil, "sub")
 	if err != nil {
 		return failedSubCall(err)

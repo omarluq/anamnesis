@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -111,6 +112,17 @@ func TestNewLoggerServiceResolvesLoggers(t *testing.T) {
 			require.NotNil(t, service.SlogLogger)
 			assert.Equal(t, testCase.zerologLevel, service.ZerologLogger.GetLevel())
 			assert.Equal(t, testCase.enabled, service.SlogLogger.Enabled(context.Background(), testCase.probe))
+
+			// An error-level record clears every configured threshold, so it must land
+			// in the configured log file rather than on the terminal — proving the
+			// service honors logging.file and writes nowhere that would corrupt the TUI.
+			service.SlogLogger.Error("logger-probe-marker")
+
+			//nolint:gosec // logFile is a test-owned t.TempDir path, not untrusted input.
+			logged, readErr := os.ReadFile(logFile)
+			require.NoError(t, readErr)
+			assert.Contains(t, string(logged), "logger-probe-marker",
+				"emitted logs land in the configured log file")
 		})
 	}
 }

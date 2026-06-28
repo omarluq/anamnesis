@@ -11,14 +11,40 @@ import (
 )
 
 // newOpenAIClient constructs the OpenAI API client the three RLM collaborators
-// issue their controller, sub-LLM, and judge calls through. The API key is read
-// from the environment (openai.NewClient's OPENAI_API_KEY lookup); construction
-// issues no network call. The provider is lazy, so the container assembles and the
+// issue their controller, sub-LLM, and judge calls through. It resolves the
+// per-role reasoning efforts from the loaded config (each ParseEffort maps the
+// configured tier onto the SDK enum) and passes them to the client, so each role's
+// effort is config-driven rather than hardcoded. The API key is read from the
+// environment (openai.NewClient's OPENAI_API_KEY lookup); construction issues no
+// network call. The provider is lazy, so the container assembles and the
 // collaborators resolve with no live call and no key present — the gpt-5.5 path
 // stays gated behind the key, which a missing value fails on the first model call
-// rather than at container assembly.
-func newOpenAIClient(_ do.Injector) (*openai.Client, error) {
-	return openai.NewClient()
+// rather than at container assembly. A ParseEffort failure cannot occur in practice
+// (config.Validate rejects unknown tiers at load) but surfaces as an oops config
+// error if an unvalidated value ever reaches here.
+func newOpenAIClient(injector do.Injector) (*openai.Client, error) {
+	cfg := do.MustInvoke[*ConfigService](injector).Get()
+
+	controllerEffort, err := openai.ParseEffort(cfg.Reasoning.Controller)
+	if err != nil {
+		return nil, err
+	}
+
+	subEffort, err := openai.ParseEffort(cfg.Reasoning.Sub)
+	if err != nil {
+		return nil, err
+	}
+
+	judgeEffort, err := openai.ParseEffort(cfg.Reasoning.Judge)
+	if err != nil {
+		return nil, err
+	}
+
+	return openai.NewClient(
+		openai.WithControllerEffort(controllerEffort),
+		openai.WithSubEffort(subEffort),
+		openai.WithJudgeEffort(judgeEffort),
+	)
 }
 
 // clientResolver lazily resolves the shared *openai.Client on demand. The three

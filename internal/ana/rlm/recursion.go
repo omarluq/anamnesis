@@ -2,6 +2,7 @@ package rlm
 
 import (
 	"context"
+	"log/slog"
 	"sync/atomic"
 
 	"github.com/samber/oops"
@@ -18,6 +19,15 @@ import (
 const (
 	subInvestigationSkipped = "sub-investigation skipped"
 	subInvestigationFailed  = "sub-investigation failed"
+)
+
+// Sub-call routing paths recorded in the run's observability log: the branch resolve
+// took for one agent.Query sub-call — degraded on a spent budget, a flat leaf call, or
+// a recursive descent into a child controller loop.
+const (
+	subCallPathSkipped = "skipped"
+	subCallPathLeaf    = "leaf"
+	subCallPathRecurse = "recurse"
 )
 
 // RecursionContext is the immutable, server-side truth of how deep a sub-call
@@ -111,28 +121,49 @@ func (s *recursiveSub) Sub(prompt, evidence string) (string, error) {
 	queryID := s.queryIDs.Add(1)
 	depth := s.rc.CurrentDepth + 1
 
+	s.budget.RecordDepth(depth)
 	s.tracer.QueryStart(queryID, prompt, depth)
 
-	result, err := s.resolve(prompt, evidence)
+	result, path, err := s.resolve(prompt, evidence)
 
 	s.tracer.QueryEnd(queryID, result, depth)
+
+	slog.Info(
+		"rlm sub-call",
+		slog.Uint64("query_id", queryID),
+		slog.Int("depth", depth),
+		slog.String("path", path),
+		slog.Int("prompt_len", len(prompt)),
+		slog.Int("result_len", len(result)),
+	)
 
 	return result, err
 }
 
 // resolve charges the shared sub-call budget and routes the call: an exhausted
 // budget degrades to text, the leaf level takes the flat base case, and a non-leaf
-// level descends one level deeper.
-func (s *recursiveSub) resolve(prompt, evidence string) (string, error) {
-	if err := s.budget.ReserveSubCall(); err != nil {
-		return degradedText(subInvestigationSkipped, err), nil
+// level descends one level deeper. It returns the routing path it took alongside the
+// answer so Sub can record it in the run's observability log.
+func (s *recursiveSub) resolve(prompt, evidence string) (answer, path string, err error) {
+	if reserveErr := s.budget.ReserveSubCall(); reserveErr != nil {
+		slog.Warn(
+			"rlm budget breach",
+			slog.String("budget", "sub_calls"),
+			slog.Int("depth", s.rc.CurrentDepth+1),
+		)
+
+		return degradedText(subInvestigationSkipped, reserveErr), subCallPathSkipped, nil
 	}
 
 	if !s.rc.CanRecurse() {
-		return s.leaf(prompt, evidence)
+		answer, err = s.leaf(prompt, evidence)
+
+		return answer, subCallPathLeaf, err
 	}
 
-	return s.recurse(prompt, evidence)
+	answer, err = s.recurse(prompt, evidence)
+
+	return answer, subCallPathRecurse, err
 }
 
 // recurse claims one shared recursion frame, runs the child controller loop one
@@ -143,6 +174,12 @@ func (s *recursiveSub) resolve(prompt, evidence string) (string, error) {
 // child loop degrades to text the parent reasons over rather than a Go error.
 func (s *recursiveSub) recurse(prompt, evidence string) (string, error) {
 	if err := s.budget.EnterDepth(); err != nil {
+		slog.Warn(
+			"rlm budget breach",
+			slog.String("budget", "depth"),
+			slog.Int("depth", s.rc.CurrentDepth+1),
+		)
+
 		return degradedText(subInvestigationSkipped, err), nil
 	}
 
@@ -280,14 +317,18 @@ func (r *recursor) runChild(
 
 // childSession frames a child controller loop: the §14 sub-controller system
 // prompt, the sub-question with its bounded context payload as the question, a
-// fresh turn budget, and a fresh citation store, sharing the run's emitter so the
-// child's turns stream onto the same trace channel.
+// fresh per-eval budget, and a fresh citation store, sharing the run's emitter so the
+// child's turns stream onto the same trace channel. Like the root loop, a child runs
+// unbounded by time or turn count — only the shared sub-call and depth budgets and the
+// hard ctx bound it.
 func (r *recursor) childSession(store *citations.Store, prompt, evidence string) *Session {
+	budget := NewBudget()
+
 	return &Session{
 		Controller:   r.deps.Controller,
 		Sub:          r.deps.Sub,
 		Judge:        r.deps.Judge,
-		Budget:       NewBudget(),
+		Budget:       budget,
 		Store:        store,
 		Emitter:      r.emitter,
 		Question:     composeChildQuestion(prompt, evidence),

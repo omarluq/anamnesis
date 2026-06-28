@@ -22,12 +22,6 @@ func TestBudgetLimitSentinels(t *testing.T) {
 		code    string
 	}{
 		{
-			name:    "turns",
-			code:    "budget_turns_exceeded",
-			limit:   func(budget *rlm.Budget) int { return budget.MaxTurns },
-			consume: func(budget *rlm.Budget) error { return budget.ReserveTurn() },
-		},
-		{
 			name:    "depth",
 			code:    "budget_depth_exceeded",
 			limit:   func(budget *rlm.Budget) int { return budget.MaxDepth },

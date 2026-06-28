@@ -2,7 +2,6 @@ package rlm_test
 
 import (
 	"context"
-	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -19,48 +18,12 @@ import (
 	"github.com/omarluq/anamnesis/internal/terminal"
 )
 
-func TestControllerRunForceFinishesAfterTurnBudget(t *testing.T) {
-	t.Parallel()
-
-	// A controller that never calls agent.FINAL must not loop forever: once it
-	// spends the §6 MaxTurns budget the loop force-finishes, returning the partial
-	// findings printed across exactly MaxTurns recorded turns.
-	ctx := context.Background()
-	fixture := newSessionFixture()
-	events := widenTrace(fixture)
-	eval := new(mockEvalCapture)
-	controller := rlm.NewController(&fixture.session, eval)
-
-	maxTurns := fixture.session.Budget.MaxTurns
-	code := `entries := journal.Boots(); fmt.Println(len(entries))`
-	thinking := "inspect one more boot before concluding"
-	codeTurn := openai.ControllerResponse{Thinking: thinking, Code: code, Done: false}
-
-	fixture.controller.
-		On("Respond", ctx, fixtureSystemPrompt, fixtureQuestion, mock.Anything).
-		Return(codeTurn, nil).
-		Times(maxTurns)
-
-	findings := scriptTurnEvals(eval, code, maxTurns)
-	wantAnswer := "investigation incomplete, partial findings: " + strings.Join(findings, "; ")
-
-	got, err := controller.Run(ctx)
-	require.NoError(t, err)
-	assert.Equal(t, wantAnswer, got)
-	require.Len(t, fixture.session.History, maxTurns)
-
-	assertTurnEvents(t, drainTrace(events), thinking, maxTurns)
-
-	fixture.controller.AssertExpectations(t)
-	eval.AssertExpectations(t)
-}
-
 func TestControllerRunForceFinishesOnCancelledContext(t *testing.T) {
 	t.Parallel()
 
-	// A context canceled before the loop starts is the §6 wall-time backstop: the
-	// loop force-finishes immediately, calls neither the controller nor the
-	// interpreter, and returns the standing header because nothing was gathered.
+	// A context canceled before the loop starts — the user quitting mid-run — makes the
+	// loop force-finish immediately, calling neither the controller nor the interpreter,
+	// and return the standing header because nothing was gathered.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -70,7 +33,10 @@ func TestControllerRunForceFinishesOnCancelledContext(t *testing.T) {
 
 	got, err := controller.Run(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, "investigation incomplete, partial findings", got)
+	assert.True(t, strings.HasPrefix(got, "investigation incomplete"),
+		"force-finish answer opens with the standing header")
+	assert.Contains(t, got, "before it ran a single turn",
+		"a pre-loop cancel reports that nothing was gathered, with no raw dump")
 	assert.Empty(t, fixture.session.History)
 
 	fixture.controller.AssertExpectations(t)
@@ -157,7 +123,12 @@ func TestControllerRunForceFinishesOnEvalTimeout(t *testing.T) {
 
 	got, err := controller.Run(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, "investigation incomplete, partial findings: "+partial, got)
+	assert.True(t, strings.HasPrefix(got, "investigation incomplete"),
+		"force-finish answer opens with the standing header")
+	assert.NotContains(t, got, partial,
+		"force-finish must not replay the timed-out turn's raw stdout into the answer")
+	assert.Contains(t, got, "1 turn(s)",
+		"force-finish reports the single turn the investigation spent before wedging")
 
 	require.Len(t, fixture.session.History, 1)
 	recorded := fixture.session.History[0]
@@ -167,81 +138,4 @@ func TestControllerRunForceFinishesOnEvalTimeout(t *testing.T) {
 
 	fixture.controller.AssertExpectations(t)
 	eval.AssertExpectations(t)
-}
-
-// widenTrace swaps the fixture's narrow trace channel for a wider buffered one so a
-// multi-turn force-finish run can emit every turn's events without the emitter
-// blocking on a full buffer, and returns the wide channel to drain.
-func widenTrace(fixture *sessionFixture) chan terminal.TraceEvent {
-	// Three buffer slots per recorded turn — a thinking event, a code-start, and a
-	// code-end — plus headroom, so the synchronous emitter never blocks before
-	// drainTrace runs, and the buffer scales with the fixture's MaxTurns budget.
-	buffer := (fixture.session.Budget.MaxTurns + 1) * 3
-
-	events := make(chan terminal.TraceEvent, buffer)
-	fixture.session.Emitter = rlm.NewEmitter(context.Background(), events, fixtureRunID)
-
-	return events
-}
-
-// scriptTurnEvals programs eval to answer each of count turns with a distinct
-// stdout finding while the run code stays constant, returning the per-turn findings
-// in turn order so a caller can roll them into the expected force-finish summary.
-func scriptTurnEvals(eval *mockEvalCapture, code string, count int) []string {
-	findings := make([]string, 0, count)
-
-	for turn := range count {
-		stdout := fmt.Sprintf("finding %d", turn)
-		findings = append(findings, stdout)
-
-		eval.
-			On("EvalContext", mock.Anything, mock.Anything, fmt.Sprintf("turn_%d", turn), code).
-			Return(repl.Result{Retval: reflect.Value{}, Stdout: stdout}, nil).
-			Once()
-	}
-
-	return findings
-}
-
-// drainTrace reads every event a force-finish run buffered onto the trace channel,
-// stopping once the channel is momentarily empty — safe because the run has already
-// returned, so no further events are coming.
-func drainTrace(events <-chan terminal.TraceEvent) []terminal.TraceEvent {
-	drained := make([]terminal.TraceEvent, 0)
-
-	for {
-		select {
-		case event := <-events:
-			drained = append(drained, event)
-		default:
-			return drained
-		}
-	}
-}
-
-// assertTurnEvents proves the loop streamed each of wantTurns recorded turns in
-// execution order — a thinking event (carrying the reasoning and this run's ID),
-// then its code-start, then its code-end — exactly three events per turn in that
-// sequence. Asserting the per-turn ORDER, not just per-kind totals, catches a
-// regression that streamed every thinking first and every code block afterward,
-// which the streaming contract forbids.
-func assertTurnEvents(t *testing.T, events []terminal.TraceEvent, thinking string, wantTurns int) {
-	t.Helper()
-
-	require.Len(t, events, wantTurns*3, "each recorded turn streams thinking, then code-start, then code-end")
-
-	for turn := range wantTurns {
-		thinkingEvent := events[turn*3]
-		codeStart := events[turn*3+1]
-		codeEnd := events[turn*3+2]
-
-		assert.Equal(t, terminal.TraceKindThinking, thinkingEvent.Kind, "turn %d opens with its thinking", turn)
-		assert.Equal(t, thinking, thinkingEvent.Text, "turn %d carries the controller's reasoning", turn)
-		assert.Equal(t, terminal.TraceKindCodeStart, codeStart.Kind, "turn %d streams code-start after thinking", turn)
-		assert.Equal(t, terminal.TraceKindCodeEnd, codeEnd.Kind, "turn %d streams code-end after code-start", turn)
-
-		for _, event := range []terminal.TraceEvent{thinkingEvent, codeStart, codeEnd} {
-			assert.Equal(t, fixtureRunID, event.RunID, "turn %d events carry the run ID", turn)
-		}
-	}
 }

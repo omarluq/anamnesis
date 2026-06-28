@@ -19,4 +19,7 @@ func TestSetDefaults(t *testing.T) {
 	assert.Equal(t, "development", viperInstance.GetString("app.env"))
 	assert.Equal(t, "info", viperInstance.GetString("logging.level"))
 	assert.Equal(t, "pretty", viperInstance.GetString("logging.format"))
+	assert.Equal(t, "medium", viperInstance.GetString("reasoning.controller"))
+	assert.Equal(t, "low", viperInstance.GetString("reasoning.sub"))
+	assert.Equal(t, "medium", viperInstance.GetString("reasoning.judge"))
 }

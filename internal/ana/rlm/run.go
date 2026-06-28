@@ -2,6 +2,7 @@ package rlm
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/samber/oops"
 
@@ -88,8 +89,9 @@ func (deps *Deps) validate() error {
 // recording journal and the recursive sub-call adapter, frames the controller with
 // the SPEC §14 system prompt, and drives the audited turn loop under the §6 hard
 // budget — the budget's wall-clock deadline (see Budget.WallTimeout) layered onto
-// ctx alongside the twelve-turn cap. agent.Query is genuinely recursive: a sub-call above the leaf
-// level spawns a full child controller loop one level deeper, while the leaf falls
+// ctx alongside the 30-turn cap. agent.Query is genuinely recursive: a sub-call
+// above the leaf level spawns a full child controller loop one level deeper, while
+// the leaf falls
 // back to a flat base-case call, all sharing one budget. It returns the
 // judge-approved final answer, which it also publishes as the terminal trace
 // event, or an oops error tagged with the rlm domain when the session cannot be
@@ -101,8 +103,14 @@ func Investigate(ctx context.Context, question string, deps *Deps) (string, erro
 
 	budget := newTreeBudget(deps)
 
-	ctx, cancel := context.WithTimeout(ctx, budget.WallTimeout)
-	defer cancel()
+	slog.InfoContext(
+		ctx,
+		"rlm investigation start",
+		slog.Uint64("run_id", deps.RunID),
+		slog.String("question", question),
+		slog.Int("max_depth", deps.MaxDepth),
+		slog.Int("max_sub_calls", deps.MaxSubCalls),
+	)
 
 	store := citations.NewStore()
 	emitter := NewEmitter(ctx, deps.Events, deps.RunID)
@@ -126,10 +134,23 @@ func Investigate(ctx context.Context, question string, deps *Deps) (string, erro
 		History:      nil,
 	}
 
-	answer, err := NewController(&session, interpreter).RunAudited(ctx)
+	controller := NewController(&session, interpreter)
+
+	answer, err := controller.RunAudited(ctx)
 	if err != nil {
 		return "", err
 	}
+
+	slog.InfoContext(
+		ctx,
+		"rlm investigation end",
+		slog.Uint64("run_id", deps.RunID),
+		slog.Int("turns", len(session.History)),
+		slog.Int64("sub_calls", budget.subCalls.Load()),
+		slog.Uint64("queries", factory.queryIDs.Load()),
+		slog.Int64("max_depth_reached", budget.maxDepthSeen.Load()),
+		slog.String("finished_by", controller.FinishReason()),
+	)
 
 	emitter.Final(answer)
 

@@ -244,9 +244,13 @@ func TestSharedBudgetCapsTwoLevelTreeNotPerChild(t *testing.T) {
 	leafSub := new(mockLeafSub)
 	leafSub.On("Answer", ctx, "leaf", "[x]").Return("leaf answer", nil).Once()
 
+	// One query-id counter is shared across both levels, mirroring the tree-wide
+	// counter newRecursor threads into every node's adapter in production.
+	queryIDs := new(atomic.Uint64)
+
 	// The leaf adapter stands in for the child controller's own agent.Query.
 	leaf := &recursiveSub{
-		queryIDs: new(atomic.Uint64),
+		queryIDs: queryIDs,
 		budget:   budget,
 		tracer:   tracer,
 		rc:       RecursionContext{CurrentDepth: 1, MaxDepth: 1},
@@ -254,7 +258,7 @@ func TestSharedBudgetCapsTwoLevelTreeNotPerChild(t *testing.T) {
 		descend:  failingDescend(t),
 	}
 	root := &recursiveSub{
-		queryIDs: new(atomic.Uint64),
+		queryIDs: queryIDs,
 		budget:   budget,
 		tracer:   tracer,
 		rc:       RecursionContext{CurrentDepth: 0, MaxDepth: 1},
@@ -283,8 +287,10 @@ func TestSharedBudgetCapFiresAcrossTwoLevelTree(t *testing.T) {
 	tracer := new(recordingTracer)
 	leafSub := new(mockLeafSub)
 
+	queryIDs := new(atomic.Uint64)
+
 	leaf := &recursiveSub{
-		queryIDs: new(atomic.Uint64),
+		queryIDs: queryIDs,
 		budget:   budget,
 		tracer:   tracer,
 		rc:       RecursionContext{CurrentDepth: 1, MaxDepth: 1},
@@ -294,7 +300,7 @@ func TestSharedBudgetCapFiresAcrossTwoLevelTree(t *testing.T) {
 		descend: failingDescend(t),
 	}
 	root := &recursiveSub{
-		queryIDs: new(atomic.Uint64),
+		queryIDs: queryIDs,
 		budget:   budget,
 		tracer:   tracer,
 		rc:       RecursionContext{CurrentDepth: 0, MaxDepth: 1},

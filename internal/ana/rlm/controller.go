@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"strings"
 	"time"
@@ -25,10 +26,25 @@ import (
 // prevent. The bound is structural here, not left to the §14 prompt's policy.
 const maxHistoryFieldBytes = 4096
 
-// forceFinishHeader prefixes the §6 force-finish answer the loop returns when it
-// exhausts the turn budget or the session's wall-clock deadline before the
-// controller signals agent.FINAL.
-const forceFinishHeader = "investigation incomplete, partial findings"
+// forceFinishHeader prefixes the force-finish answer the loop returns when a run ends
+// before the controller signals agent.FINAL — the user canceled it or a turn's eval
+// wedged and timed out. It carries no findings — the note under it does — so it stays
+// honest about the run ending without a grounded conclusion.
+const forceFinishHeader = "investigation incomplete"
+
+// forceFinishReason names why the §6 loop settled: finishFinal when the model
+// resolved a terminal answer through agent.FINAL, finishContinue when the loop may
+// take another turn, or one of the force-finish causes. It is recorded on the
+// controller and surfaced in the run's observability log so a force-finish is told
+// apart from a clean finish, and its cause kept distinct.
+type forceFinishReason string
+
+const (
+	finishContinue    forceFinishReason = ""
+	finishFinal       forceFinishReason = "final"
+	finishCtxCanceled forceFinishReason = "ctx_canceled"
+	finishEvalTimeout forceFinishReason = "eval_timeout"
+)
 
 // critiqueHeader labels the judge's critique where the loop appends it to the
 // controller transcript on a §5 retry turn, so the controller can tell the audit's
@@ -78,6 +94,10 @@ type Controller struct {
 	// retry: the loop surfaces it to the controller on the retry turn, and its
 	// presence marks the retry as spent so a second critique renders the answer.
 	critique string
+	// finished records how the loop settled — finishFinal for a model-signaled
+	// agent.FINAL, or the force-finish cause — so the run-end observability summary
+	// can tell a clean finish from a force-finish. It is set as the loop returns.
+	finished forceFinishReason
 }
 
 // NewController binds session and eval into the controller spine the turn loop
@@ -85,14 +105,15 @@ type Controller struct {
 // evaluates each turn's code through eval, appends to session.History, and emits
 // onto session.Emitter.
 func NewController(session *Session, eval EvalCapture) *Controller {
-	return &Controller{session: session, eval: eval, critique: ""}
+	return &Controller{session: session, eval: eval, critique: "", finished: finishContinue}
 }
 
 // Run executes the controller turn loop until the model reports Done, returning
-// the resolved final answer. Before every turn it consults the §6 hard budget:
-// when the caller has canceled the context — the wall-time backstop — or the
-// MaxTurns budget is spent, it stops and returns the force-finish answer assembled
-// from the partial findings printed so far. Otherwise each non-final turn
+// the resolved final answer. The loop is unbounded by time or turn count: it runs
+// until the model signals agent.FINAL, the caller cancels the context (the user
+// quits), or a turn's eval wedges and times out — the last two return the
+// force-finish answer, a short honest note that it ended without a grounded
+// conclusion. Each non-final turn
 // evaluates the model's generated Go — recovering an over-budget agent.Query panic
 // onto the turn's Err field rather than unwinding the loop — appends a
 // ControllerTurn to the session history, and emits a turn trace event; the final
@@ -101,13 +122,16 @@ func NewController(session *Session, eval EvalCapture) *Controller {
 // returns an error when a controller call fails or when the model reports Done
 // without a resolvable answer. A turn whose eval times out — a non-terminating loop
 // the interpreter cannot preempt — force-finishes the loop too: its abandoned
-// goroutine poisons the interpreter, so the loop returns the partial findings rather
-// than taking another turn against a poisoned session. Run drives the §6 loop only;
+// goroutine poisons the interpreter, so the loop force-finishes with that honest
+// note rather than taking another turn against a poisoned session. Run drives the §6
+// loop only;
 // RunAudited layers the §5 judge gate on top.
 func (controller *Controller) Run(ctx context.Context) (string, error) {
 	for {
-		if controller.reserveTurnOrFinish(ctx) {
-			return controller.forceFinish(), nil
+		select {
+		case <-ctx.Done():
+			return controller.forceFinish(finishCtxCanceled), nil
+		default:
 		}
 
 		response, err := controller.respond(ctx)
@@ -116,11 +140,13 @@ func (controller *Controller) Run(ctx context.Context) (string, error) {
 		}
 
 		if response.Done {
+			controller.finished = finishFinal
+
 			return controller.resolve()
 		}
 
 		if controller.recordTurn(ctx, response) {
-			return controller.forceFinish(), nil
+			return controller.forceFinish(finishEvalTimeout), nil
 		}
 	}
 }
@@ -131,19 +157,48 @@ func (controller *Controller) Run(ctx context.Context) (string, error) {
 // is already spent — renders the answer, while a first critique is recorded for the
 // controller and the loop runs once more so the controller can revise against it,
 // seeing that critique surfaced in its framed history. The shared session budget
-// caps the revision, so the gate settles after at most one extra pass. When the §6
-// wall-time backstop has already canceled the context, Run returns its force-finish
-// answer and the gate is skipped: auditing on the dead context would only fail the
-// judge call with a deadline error, so a timeout renders the partial answer rather
-// than turning into an error. It returns an error when the loop fails, a cited cursor
-// was never made visible, or the judge call fails.
+// caps the revision, so the gate settles after at most one extra pass.
+//
+// Only a model-signaled agent.FINAL is audited, and a grounded FINAL is never
+// downgraded. A force-finished pass — the soft deadline, an exhausted turn budget, an
+// eval timeout, or the hard wall-time backstop canceling the context — yields an
+// honest "investigation incomplete" note, not a grounded conclusion. So the loop
+// remembers the last grounded FINAL: if a later pass force-finishes (most often the
+// §5 revision running out the turn budget), RunAudited renders that remembered FINAL
+// rather than replacing it with the incomplete note; only when no pass ever finalized
+// is the note itself the honest result. This keeps the judge off a non-answer and
+// keeps a critique-then-force-finish from silently erasing a sound answer. The
+// revision pass also runs past the soft deadline under the hard ctx alone (see
+// reserveTurnOrFinish), so the rewrite gets a real chance at a fresh FINAL before the
+// turn budget bounds it. It returns an error when the loop fails, a cited cursor was
+// never made visible, or the judge call fails.
 func (controller *Controller) RunAudited(ctx context.Context) (string, error) {
+	var (
+		lastFinal string
+		finalized bool
+	)
+
 	for {
 		answer, err := controller.Run(ctx)
 		if err != nil {
 			return "", err
 		}
 
+		// A force-finished pass is a non-answer: render the last grounded FINAL if one was
+		// reached, else the honest note. Either way the judge and the revision are skipped.
+		if controller.finished != finishFinal {
+			if finalized {
+				return lastFinal, nil
+			}
+
+			return answer, nil
+		}
+
+		lastFinal, finalized = answer, true
+
+		// The §6 hard wall-time backstop canceled the run after this FINAL resolved:
+		// auditing on a dead context would only fail the judge with a deadline error, so
+		// render the resolved answer rather than turning a timeout into an error.
 		select {
 		case <-ctx.Done():
 			return answer, nil
@@ -159,6 +214,13 @@ func (controller *Controller) RunAudited(ctx context.Context) (string, error) {
 			return answer, nil
 		}
 	}
+}
+
+// FinishReason reports how the loop settled — "final" for a model-signaled
+// agent.FINAL, or the force-finish cause — for the run-end observability summary. It
+// is meaningful only after Run or RunAudited has returned.
+func (controller *Controller) FinishReason() string {
+	return string(controller.finished)
 }
 
 // reviewed runs the post-FINAL §5 gate over a resolved answer and reports whether
@@ -244,39 +306,43 @@ func (controller *Controller) retrySpent() bool {
 	return controller.critique != ""
 }
 
-// reserveTurnOrFinish reserves the next controller turn and reports whether the
-// loop must force-finish instead of taking it: the caller has canceled the
-// context — the §6 wall-time backstop — or the controller has spent its MaxTurns
-// budget. The turn reservation is a deliberate side effect — consuming the turn
-// here is what makes a later call observe the exhaustion — so the name reads as a
-// reservation, not a pure predicate, and the loop calls it exactly once per pass.
-func (controller *Controller) reserveTurnOrFinish(ctx context.Context) bool {
-	if ctx.Err() != nil {
-		return true
+// forceFinish assembles the §6 force-finish answer the loop renders when it stops for
+// reason before the controller signals agent.FINAL: a short, honest Markdown note that
+// the run ended without a grounded conclusion. It deliberately does NOT replay the
+// controller's per-turn stdout — folding that raw journald output back into the answer
+// is the §14 rule-1 dump the RLM loop exists to prevent, and replaying it is what made
+// a force-finished run render as a wall of intermediate tool output instead of a
+// report. The only detail it carries is the bounded, truthful count of turns the
+// investigation spent. It records reason on the controller and logs it so the run-end
+// summary can tell the cause — a user cancel or an eval timeout — apart.
+func (controller *Controller) forceFinish(reason forceFinishReason) string {
+	controller.finished = reason
+
+	slog.Warn(
+		"rlm force-finish",
+		slog.String("reason", string(reason)),
+		slog.Int("turns", len(controller.session.History)),
+	)
+
+	return forceFinishHeader + "\n\n" + controller.forceFinishNote()
+}
+
+// forceFinishNote is the one-line body under the force-finish header: the bounded,
+// truthful fact of how far the investigation got. With no recorded turns the run ended
+// before it could gather anything; otherwise it ran that many turns without ever
+// calling agent.FINAL.
+func (controller *Controller) forceFinishNote() string {
+	turns := len(controller.session.History)
+	if turns == 0 {
+		return "The investigation was stopped at its wall-clock budget before it ran " +
+			"a single turn, so there is nothing to report."
 	}
 
-	return controller.session.Budget.ReserveTurn() != nil
-}
-
-// forceFinish assembles the §6 force-finish answer: the standing header on its own
-// when nothing was gathered yet, or the header followed by the partial findings the
-// controller printed across its recorded turns.
-func (controller *Controller) forceFinish() string {
-	return mo.EmptyableToOption(controller.partialFindings()).
-		Map(func(findings string) (string, bool) {
-			return forceFinishHeader + ": " + findings, true
-		}).
-		OrElse(forceFinishHeader)
-}
-
-// partialFindings joins the non-empty stdout the controller printed across its
-// recorded turns into the single summary the force-finish answer carries.
-func (controller *Controller) partialFindings() string {
-	printed := lo.FilterMap(controller.session.History, func(turn ControllerTurn, _ int) (string, bool) {
-		return turn.Stdout, turn.Stdout != ""
-	})
-
-	return strings.Join(printed, "; ")
+	return fmt.Sprintf(
+		"The investigation stopped after %d turn(s) without the controller calling "+
+			"agent.FINAL, so no grounded conclusion is available.",
+		turns,
+	)
 }
 
 // respond renders the framed history so far and asks the controller model for the
@@ -372,6 +438,14 @@ func (controller *Controller) recordTurn(ctx context.Context, response openai.Co
 		controller.session.Emitter.CodeEnd(codeOutput(result), renderErr(evalErr))
 	}
 
+	slog.InfoContext(
+		ctx,
+		"rlm turn",
+		slog.Int("turn", index),
+		slog.Bool("has_code", hasCode),
+		slog.String("eval_err", renderErr(evalErr)),
+	)
+
 	return evalTimedOut(evalErr)
 }
 
@@ -433,7 +507,7 @@ func evalTimedOut(err error) bool {
 
 	var oopsErr oops.OopsError
 	if errors.As(err, &oopsErr) {
-		return oopsErr.Code() == "eval_timed_out"
+		return oopsErr.Code() == repl.CodeEvalTimedOut
 	}
 
 	return false

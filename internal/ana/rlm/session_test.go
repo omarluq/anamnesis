@@ -153,7 +153,7 @@ func TestSessionWiresBudgetStoreEmitter(t *testing.T) {
 	assert.Equal(t, fixtureQuestion, session.Question)
 	assert.Equal(t, fixtureSystemPrompt, session.SystemPrompt)
 
-	require.NoError(t, session.Budget.ReserveTurn())
+	require.NoError(t, session.Budget.ReserveSubCall())
 
 	session.Emitter.Thinking("planning")
 

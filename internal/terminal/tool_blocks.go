@@ -24,8 +24,6 @@ const (
 	// labelArgs and labelOutput head the expanded query block's sections.
 	labelArgs   = "args"
 	labelOutput = "output"
-	// queryIndentUnit is one level of recursion indentation for nested blocks.
-	queryIndentUnit = "  "
 )
 
 // parsedQuery is the decoded view of a query block's wire content.
@@ -36,16 +34,15 @@ type parsedQuery struct {
 	Error  string
 }
 
-// renderQueryBlock renders a recursive agent.Query sub-call as a color-coded box
-// in one of three modes — pending, collapsed, or expanded — then indents the whole
-// block by its recursion depth so nested fan-out reads as a tree.
+// renderQueryBlock renders a recursive agent.Query sub-call as a color-coded box in one
+// of three modes — pending, collapsed, or expanded. Every block is laid out at the same
+// left margin regardless of recursion depth, so the transcript reads as a flat sequence
+// of blocks rather than a nested tree.
 func (app *App) renderQueryBlock(width int, message chatMessage) []tui.Line {
 	parsed := parseQueryContent(message.Content)
-	blockWidth := queryBlockWidth(width, message.Depth)
 	style := queryBlockStyle(app.theme, message, parsed)
-	block := app.renderQueryMode(blockWidth, message, parsed, style)
 
-	return indentQueryLines(block, message.Depth)
+	return app.renderQueryMode(width, message, parsed, style)
 }
 
 // renderQueryMode selects the block layout for the query's current state: a pending
@@ -234,29 +231,6 @@ func paddedQueryLine(width int, content string, style tcell.Style) tui.Line {
 // queryContentWidth is the writable width inside a block's gutters.
 func queryContentWidth(width int) int {
 	return max(1, width-messageBoxHorizontalPadding)
-}
-
-// queryBlockWidth is the box width left for a block nested at depth, before its
-// indentation is prepended.
-func queryBlockWidth(width, depth int) int {
-	return max(1, width-depth*len(queryIndentUnit))
-}
-
-// indentQueryLines prepends depth levels of indentation to every line of a block
-// so a nested sub-call sits inside its parent.
-func indentQueryLines(lines []tui.Line, depth int) []tui.Line {
-	if depth <= 0 {
-		return lines
-	}
-
-	indent := strings.Repeat(queryIndentUnit, depth)
-	indented := make([]tui.Line, 0, len(lines))
-
-	for _, line := range lines {
-		indented = append(indented, line.WithPrefix(indent, tcell.StyleDefault))
-	}
-
-	return indented
 }
 
 // queryOutput is the block's displayable output: the result, prefixed with the

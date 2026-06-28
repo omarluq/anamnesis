@@ -71,6 +71,77 @@ func TestControllerRunRendersAnswerAfterSecondCritique(t *testing.T) {
 	assertJudgeRetryRendersAnswer(t, "still too vague to act on")
 }
 
+func TestRunAuditedSkipsJudgeOnForceFinish(t *testing.T) {
+	t.Parallel()
+
+	// A force-finished investigation yields an honest "investigation incomplete" note,
+	// not a grounded answer: RunAudited returns it directly without auditing it, so the
+	// judge is never called on a non-answer.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	fixture := newSessionFixture()
+	eval := new(mockEvalCapture)
+	controller := rlm.NewController(&fixture.session, eval)
+
+	got, err := controller.RunAudited(ctx)
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(got, "investigation incomplete"),
+		"a force-finished run renders the honest incomplete note")
+	assert.Equal(t, "ctx_canceled", controller.FinishReason(),
+		"the force-finish reason is the canceled context")
+
+	fixture.judge.AssertNotCalled(t, "Judge")
+	fixture.controller.AssertNotCalled(t, "Respond")
+	fixture.controller.AssertExpectations(t)
+	eval.AssertExpectations(t)
+	fixture.judge.AssertExpectations(t)
+}
+
+func TestRunAuditedPreservesGroundedFinalWhenRevisionForceFinishes(t *testing.T) {
+	t.Parallel()
+
+	// The §5 regression: a grounded FINAL the judge critiques must NOT be downgraded to
+	// the "investigation incomplete" note when the revision pass then force-finishes.
+	// Here the first pass reaches FINAL and is judged; the judge cancels the run as it
+	// critiques, so the revision pass force-finishes on the canceled context before
+	// taking a turn — and RunAudited returns the last grounded FINAL rather than the note.
+	ctx, cancel := context.WithCancel(context.Background())
+	fixture := newSessionFixture()
+	eval := new(mockEvalCapture)
+	controller := rlm.NewController(&fixture.session, eval)
+
+	answer := "checkout-api was OOM-killed; the leak is in cache.service"
+	critique := "tie the OOM-kill to a cited entry"
+	doneTurn := openai.ControllerResponse{Thinking: "conclude with the root cause", Code: "", Done: true}
+
+	fixture.controller.
+		On("Respond", ctx, fixtureSystemPrompt, fixtureQuestion, "").
+		Return(doneTurn, nil).
+		Once()
+	eval.On("Final").Return(answer, true).Once()
+	fixture.judge.
+		On("Judge", ctx, fixtureQuestion, answer, "").
+		Run(func(mock.Arguments) { cancel() }).
+		Return(critique, nil).
+		Once()
+
+	got, err := controller.RunAudited(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, answer, got, "the grounded FINAL is preserved, not downgraded")
+	assert.NotContains(t, got, "investigation incomplete",
+		"a force-finished revision must not erase a sound answer")
+
+	// One pass finalized and was judged once; the revision force-finished on the canceled
+	// context without another Respond or Judge call.
+	fixture.controller.AssertNumberOfCalls(t, "Respond", 1)
+	fixture.judge.AssertNumberOfCalls(t, "Judge", 1)
+
+	fixture.controller.AssertExpectations(t)
+	eval.AssertExpectations(t)
+	fixture.judge.AssertExpectations(t)
+}
+
 func TestControllerRunRejectsFabricatedCitation(t *testing.T) {
 	t.Parallel()
 

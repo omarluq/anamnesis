@@ -25,6 +25,9 @@ const (
 	codeName = "code"
 	// thinkingLabel heads a thinking block (always shown in full).
 	thinkingLabel = "thinking"
+	// interruptedNote settles a tool block whose run ended before its matching end
+	// event arrived, so a force-finished run leaves no block spinning forever.
+	interruptedNote = "interrupted — the run ended before this step finished"
 )
 
 // chatMessage is one entry in the scrolling transcript: a role plus its rendered
@@ -34,10 +37,15 @@ const (
 // and its matching end (TraceKindQueryEnd / TraceKindCodeEnd). A query block also
 // carries the QueryID its start event minted, so completeQuery settles an end onto
 // its own start even when parallel fan-out completes out of order; non-query blocks
-// leave it 0.
+// leave it 0. A query or code block also keeps its raw Args — the agent.Query prompt
+// or the turn's Go source — so completeQuery and completeCode re-render the settled
+// block from that stored payload instead of parsing it back out of the already-rendered
+// Content, which is ambiguous when the prompt or code contains a line that looks like a
+// wire-format section marker (output:, error:, details:); other blocks leave it empty.
 type chatMessage struct {
 	Role    transcript.Role
 	Content string
+	Args    string
 	QueryID uint64
 	Depth   int
 	Pending bool
@@ -45,7 +53,7 @@ type chatMessage struct {
 
 // newChatMessage builds a settled, top-level message of role carrying content.
 func newChatMessage(role transcript.Role, content string) chatMessage {
-	return chatMessage{Role: role, Content: content, QueryID: 0, Depth: 0, Pending: false}
+	return chatMessage{Role: role, Content: content, Args: "", QueryID: 0, Depth: 0, Pending: false}
 }
 
 // appendUser appends the user's submitted prompt as a user message and returns
@@ -98,6 +106,7 @@ func (app *App) appendThinkingDelta(delta string) {
 	app.history = append(app.history, chatMessage{
 		Role:    transcript.RoleThinking,
 		Content: delta,
+		Args:    "",
 		QueryID: 0,
 		Depth:   0,
 		Pending: true,
@@ -132,6 +141,7 @@ func (app *App) appendQueryStart(queryID uint64, prompt string, depth int) {
 	app.history = append(app.history, chatMessage{
 		Role:    transcript.RoleToolResult,
 		Content: queryContent(prompt, ""),
+		Args:    prompt,
 		QueryID: queryID,
 		Depth:   depth,
 		Pending: true,
@@ -149,10 +159,10 @@ func (app *App) completeQuery(queryID uint64, result string) {
 			continue
 		}
 
-		parsed := parseQueryContent(message.Content)
 		app.history[index] = chatMessage{
 			Role:    transcript.RoleToolResult,
-			Content: queryContent(parsed.Args, result),
+			Content: queryContent(message.Args, result),
+			Args:    message.Args,
 			QueryID: queryID,
 			Depth:   message.Depth,
 			Pending: false,
@@ -198,6 +208,7 @@ func (app *App) appendCodeStart(code string) {
 	app.history = append(app.history, chatMessage{
 		Role:    transcript.RoleBashExecution,
 		Content: codeContent(code, "", ""),
+		Args:    code,
 		QueryID: 0,
 		Depth:   0,
 		Pending: true,
@@ -214,10 +225,10 @@ func (app *App) completeCode(output, errText string) {
 			continue
 		}
 
-		parsed := parseQueryContent(message.Content)
 		app.history[index] = chatMessage{
 			Role:    transcript.RoleBashExecution,
-			Content: codeContent(parsed.Args, output, errText),
+			Content: codeContent(message.Args, output, errText),
+			Args:    message.Args,
 			QueryID: 0,
 			Depth:   0,
 			Pending: false,
@@ -235,6 +246,7 @@ func (app *App) appendJudgeStart(_ string) {
 	app.history = append(app.history, chatMessage{
 		Role:    transcript.RoleToolResult,
 		Content: judgeContent(judgeArgs, ""),
+		Args:    judgeArgs,
 		QueryID: 0,
 		Depth:   0,
 		Pending: true,
@@ -265,6 +277,7 @@ func (app *App) completeJudge(critique string) {
 		app.history[index] = chatMessage{
 			Role:    transcript.RoleToolResult,
 			Content: judgeContent(judgeArgs, output),
+			Args:    judgeArgs,
 			QueryID: 0,
 			Depth:   0,
 			Pending: false,
@@ -272,6 +285,56 @@ func (app *App) completeJudge(critique string) {
 
 		return
 	}
+}
+
+// settlePending finalizes every block still marked pending when a run ends. A
+// force-finish — the §6 soft deadline, the wall-clock timeout, or an eval timeout —
+// cancels the run while a code or agent.Query block is in flight, so its CodeEnd or
+// QueryEnd never reaches the shell: the emitter drops a post-cancel send rather than
+// panicking on the teardown-closed trace channel. Without this the dropped end would
+// leave the block's pending spinner turning forever; here each open block settles with
+// an interrupted note, re-rendered from its stored raw Args so the unfinished prompt or
+// code stays intact.
+func (app *App) settlePending() {
+	for index, message := range app.history {
+		if message.Pending {
+			app.history[index] = settleInterrupted(message)
+		}
+	}
+}
+
+// settleInterrupted returns message settled with the interrupted note: a code block and
+// a query block re-render from their raw Args so the in-flight payload survives, a judge
+// block keeps its fixed args line, and any non-tool role just clears its pending flag.
+func settleInterrupted(message chatMessage) chatMessage {
+	settled := message
+	settled.Pending = false
+
+	switch message.Role {
+	case transcript.RoleBashExecution:
+		settled.Content = codeContent(message.Args, interruptedNote, "")
+	case transcript.RoleToolResult:
+		settled.Content = interruptedToolContent(message)
+	case transcript.RoleUser,
+		transcript.RoleAssistant,
+		transcript.RoleThinking,
+		transcript.RoleCustom,
+		transcript.RoleBranchSummary,
+		transcript.RoleCompactionSummary:
+		// these roles never carry a pending tool block; clearing Pending settles them.
+	}
+
+	return settled
+}
+
+// interruptedToolContent re-renders an interrupted RoleToolResult block: a judge block
+// keeps its fixed args line, while an agent.Query block renders from its stored raw Args.
+func interruptedToolContent(message chatMessage) string {
+	if parseQueryContent(message.Content).Name == judgeName {
+		return judgeContent(judgeArgs, interruptedNote)
+	}
+
+	return queryContent(message.Args, interruptedNote)
 }
 
 // codeContent renders a code block's Go source, captured output, and any error into
