@@ -9,8 +9,6 @@ const (
 	borderTopRight    = "╮"
 	borderBottomLeft  = "╰"
 	borderBottomRight = "╯"
-	borderMiddleLeft  = "├"
-	borderMiddleRight = "┤"
 )
 
 // Border contains the runes used to draw a box.
@@ -21,8 +19,6 @@ type Border struct {
 	TopRight    string
 	BottomLeft  string
 	BottomRight string
-	MiddleLeft  string
-	MiddleRight string
 }
 
 // RoundedBorder returns the default rounded border style.
@@ -34,8 +30,6 @@ func RoundedBorder() Border {
 		TopRight:    borderTopRight,
 		BottomLeft:  borderBottomLeft,
 		BottomRight: borderBottomRight,
-		MiddleLeft:  borderMiddleLeft,
-		MiddleRight: borderMiddleRight,
 	}
 }
 

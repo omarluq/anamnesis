@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/samber/oops"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/omarluq/anamnesis/internal/ana/repl"
+	"github.com/omarluq/anamnesis/internal/ana/repl/repltest"
 	"github.com/omarluq/anamnesis/internal/ana/rlm"
 	"github.com/omarluq/anamnesis/internal/openai"
 	"github.com/omarluq/anamnesis/internal/terminal"
@@ -102,10 +102,7 @@ func TestControllerRunErrorsWhenDoneWithoutTerminalAnswer(t *testing.T) {
 	assert.Empty(t, got)
 	require.ErrorContains(t, err, "done without a terminal answer")
 
-	var oopsErr oops.OopsError
-
-	require.ErrorAs(t, err, &oopsErr)
-	assert.Equal(t, "controller_missing_final", oopsErr.Code())
+	repltest.RequireOopsCode(t, err, "rlm", "controller_missing_final")
 
 	assert.Empty(t, fixture.session.History)
 	fixture.controller.AssertExpectations(t)

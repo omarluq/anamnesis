@@ -210,7 +210,7 @@ func (app *App) applyTrace(event TraceEvent) {
 	case TraceKindQueryStart:
 		app.working = true
 
-		app.appendQueryStart(event.QueryID, event.Text, event.Depth)
+		app.appendQueryStart(event.QueryID, event.Text)
 	case TraceKindQueryEnd:
 		app.completeQuery(event.QueryID, event.Text)
 	case TraceKindJudgeStart:

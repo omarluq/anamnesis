@@ -99,11 +99,6 @@ func (view *MarkdownView) Render(width, height int) []Line {
 	return Tail(renderer.lines, height)
 }
 
-// Draw draws markdown into rect.
-func (view *MarkdownView) Draw(screen ContentSetter, rect Rect) {
-	DrawLines(screen, rect, view.Render(rect.Width, rect.Height))
-}
-
 // engine returns the injected parser engine or a new lazily initialized engine.
 func (view *MarkdownView) engine() *MarkdownEngine {
 	if view.Engine != nil {

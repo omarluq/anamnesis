@@ -95,11 +95,6 @@ func (table *Table) Render(width, height int) []Line {
 	return lines[:min(len(lines), height)]
 }
 
-// Draw draws table into rect.
-func (table *Table) Draw(screen ContentSetter, rect Rect) {
-	DrawLines(screen, rect, table.Render(rect.Width, rect.Height))
-}
-
 func (table *Table) allRows() [][]TableCell {
 	rows := [][]TableCell{}
 	if len(table.Headers) > 0 {

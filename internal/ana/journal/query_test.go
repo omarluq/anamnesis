@@ -67,10 +67,7 @@ func TestQueryRecordsUnitBootAndPriorityMatches(t *testing.T) {
 	reader.On("SeekHead").Return(nil)
 	reader.On("Next").Return(uint64(0), nil)
 
-	factory := new(mockFactory)
-	factory.On("NewReader").Return(reader, nil).Once()
-
-	client := journal.NewClientWithFactory(factory, 1)
+	client, factory := clientWithReader(t, reader, 1)
 
 	filter := zeroFilter()
 	filter.Unit = unitSSH
@@ -91,58 +88,94 @@ func TestQueryRecordsUnitBootAndPriorityMatches(t *testing.T) {
 	// unit + boot + one match per priority level 0..filterMaxPriority.
 	reader.AssertNumberOfCalls(t, "AddMatch", 2+filterMaxPriority+1)
 
-	require.NoError(t, client.Close())
 	factory.AssertExpectations(t)
 }
 
-func TestQueryGrepFiltersByMessageSubstring(t *testing.T) {
-	t.Parallel()
+// Realtime bounds of the fixture window the Since/Until behavior selects, shared by
+// the case's filter setup and its per-entry bounds check.
+var (
+	windowSince = time.UnixMicro(1782453630000000).UTC()
+	windowUntil = time.UnixMicro(1782453660000000).UTC()
+)
 
-	client := journal.NewClientWithFactory(newFixtureFactory(t), 1)
-
-	filter := zeroFilter()
-	filter.Grep = "memory pressure"
-
-	entries, err := client.Query(&filter)
-	require.NoError(t, err)
-	assert.Len(t, entries, memoryPressureCount)
-
-	for index := range entries {
-		assert.Contains(t, entries[index].Message, "memory pressure")
-	}
-
-	require.NoError(t, client.Close())
+// queryBehaviorCases drives the fixture-backed Query behaviors that share the shape
+// "build a filter, assert the matched count, then check a per-entry invariant", so
+// the grep, time-window, explicit-limit and cursor behaviors read as one table. A
+// nil perEntry asserts the count alone.
+var queryBehaviorCases = []struct {
+	adjust   func(filter *journal.QueryFilter)
+	perEntry func(t *testing.T, entry *journal.Entry)
+	name     string
+	want     int
+}{
+	{
+		name:   "grep_filters_by_message_substring",
+		adjust: func(filter *journal.QueryFilter) { filter.Grep = "memory pressure" },
+		perEntry: func(t *testing.T, entry *journal.Entry) {
+			t.Helper()
+			assert.Contains(t, entry.Message, "memory pressure")
+		},
+		want: memoryPressureCount,
+	},
+	{
+		name: "since_until_bound_the_window",
+		adjust: func(filter *journal.QueryFilter) {
+			filter.Since = windowSince
+			filter.Until = windowUntil
+		},
+		perEntry: func(t *testing.T, entry *journal.Entry) {
+			t.Helper()
+			assert.False(t, entry.Timestamp.Before(windowSince), "entry predates the Since bound")
+			assert.False(t, entry.Timestamp.After(windowUntil), "entry postdates the Until bound")
+		},
+		want: windowedCount,
+	},
+	{
+		name:     "explicit_limit_caps_the_result",
+		adjust:   func(filter *journal.QueryFilter) { filter.Limit = explicitLimit },
+		perEntry: nil,
+		want:     explicitLimit,
+	},
+	{
+		name:   "entries_carry_cursor",
+		adjust: func(_ *journal.QueryFilter) {},
+		perEntry: func(t *testing.T, entry *journal.Entry) {
+			t.Helper()
+			assert.NotEmpty(t, entry.Cursor, "entry carries no __CURSOR")
+		},
+		want: fixtureRecordCount,
+	},
 }
 
-func TestQuerySinceUntilBoundTheWindow(t *testing.T) {
+func TestQueryBehaviors(t *testing.T) {
 	t.Parallel()
 
-	since := time.UnixMicro(1782453630000000).UTC()
-	until := time.UnixMicro(1782453660000000).UTC()
+	for _, testCase := range queryBehaviorCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
 
-	client := journal.NewClientWithFactory(newFixtureFactory(t), 1)
+			client := newFixtureClient(t)
 
-	filter := zeroFilter()
-	filter.Since = since
-	filter.Until = until
+			filter := zeroFilter()
+			testCase.adjust(&filter)
 
-	entries, err := client.Query(&filter)
-	require.NoError(t, err)
-	assert.Len(t, entries, windowedCount)
+			entries, err := client.Query(&filter)
+			require.NoError(t, err)
+			require.Len(t, entries, testCase.want)
 
-	for index := range entries {
-		stamp := entries[index].Timestamp
-		assert.False(t, stamp.Before(since), "entry predates the Since bound")
-		assert.False(t, stamp.After(until), "entry postdates the Until bound")
+			if testCase.perEntry != nil {
+				for index := range entries {
+					testCase.perEntry(t, &entries[index])
+				}
+			}
+		})
 	}
-
-	require.NoError(t, client.Close())
 }
 
 func TestQueryUnitBootPriorityFilterSelectsExpectedEntry(t *testing.T) {
 	t.Parallel()
 
-	client := journal.NewClientWithFactory(newFixtureFactory(t), 1)
+	client := newFixtureClient(t)
 
 	filter := zeroFilter()
 	filter.Unit = unitNginx
@@ -158,19 +191,13 @@ func TestQueryUnitBootPriorityFilterSelectsExpectedEntry(t *testing.T) {
 	assert.Equal(t, bootSecond, only.BootID)
 	assert.Equal(t, 3, only.Priority)
 	assert.Contains(t, only.Message, "connect() failed")
-
-	require.NoError(t, client.Close())
 }
 
 func TestQueryDefaultsLimitToOneThousand(t *testing.T) {
 	t.Parallel()
 
 	reader := newEndlessReader()
-
-	factory := new(mockFactory)
-	factory.On("NewReader").Return(reader, nil).Once()
-
-	client := journal.NewClientWithFactory(factory, 1)
+	client, factory := clientWithReader(t, reader, 1)
 
 	filter := zeroFilter()
 
@@ -180,7 +207,6 @@ func TestQueryDefaultsLimitToOneThousand(t *testing.T) {
 
 	reader.AssertNumberOfCalls(t, "Next", 1000)
 
-	require.NoError(t, client.Close())
 	factory.AssertExpectations(t)
 }
 
@@ -188,11 +214,7 @@ func TestQueryClampsLimitAtTenThousand(t *testing.T) {
 	t.Parallel()
 
 	reader := newEndlessReader()
-
-	factory := new(mockFactory)
-	factory.On("NewReader").Return(reader, nil).Once()
-
-	client := journal.NewClientWithFactory(factory, 1)
+	client, factory := clientWithReader(t, reader, 1)
 
 	filter := zeroFilter()
 	filter.Limit = 50000
@@ -203,49 +225,13 @@ func TestQueryClampsLimitAtTenThousand(t *testing.T) {
 
 	reader.AssertNumberOfCalls(t, "Next", 10000)
 
-	require.NoError(t, client.Close())
 	factory.AssertExpectations(t)
-}
-
-func TestQueryHonorsExplicitLimit(t *testing.T) {
-	t.Parallel()
-
-	client := journal.NewClientWithFactory(newFixtureFactory(t), 1)
-
-	filter := zeroFilter()
-	filter.Limit = explicitLimit
-
-	entries, err := client.Query(&filter)
-	require.NoError(t, err)
-	assert.Len(t, entries, explicitLimit)
-
-	require.NoError(t, client.Close())
-}
-
-func TestQueryEntriesCarryCursor(t *testing.T) {
-	t.Parallel()
-
-	client := journal.NewClientWithFactory(newFixtureFactory(t), 1)
-
-	filter := zeroFilter()
-
-	entries, err := client.Query(&filter)
-	require.NoError(t, err)
-	require.Len(t, entries, fixtureRecordCount)
-
-	for index := range entries {
-		assert.NotEmptyf(t, entries[index].Cursor, "entry %d carries no __CURSOR", index)
-	}
-
-	require.NoError(t, client.Close())
 }
 
 func TestQueryPropagatesAcquireFailure(t *testing.T) {
 	t.Parallel()
 
-	factory := new(mockFactory)
-	factory.On("NewReader").Return(nil, assert.AnError).Once()
-
+	factory := failingFactory()
 	client := journal.NewClientWithFactory(factory, 1)
 
 	filter := zeroFilter()
@@ -264,13 +250,11 @@ func TestQueryPropagatesAcquireFailure(t *testing.T) {
 func TestQueryNilFilterMatchesEverything(t *testing.T) {
 	t.Parallel()
 
-	client := journal.NewClientWithFactory(newFixtureFactory(t), 1)
+	client := newFixtureClient(t)
 
 	entries, err := client.Query(nil)
 	require.NoError(t, err)
 	assert.Len(t, entries, fixtureRecordCount)
-
-	require.NoError(t, client.Close())
 }
 
 // TestUniqueNilFilterMatchesEverything pins the same contract for Client.Unique,
@@ -280,13 +264,11 @@ func TestQueryNilFilterMatchesEverything(t *testing.T) {
 func TestUniqueNilFilterMatchesEverything(t *testing.T) {
 	t.Parallel()
 
-	client := journal.NewClientWithFactory(newFixtureFactory(t), 1)
+	client := newFixtureClient(t)
 
 	values, err := client.Unique(journal.FieldUnit, nil)
 	require.NoError(t, err)
 	assert.Equal(t, []string{unitCron, unitNginx, unitSSH, unitOomd}, values)
-
-	require.NoError(t, client.Close())
 }
 
 // queryErrCase drives one journald error-propagation branch of Query: script
@@ -341,10 +323,7 @@ func TestQueryPropagatesReaderErrors(t *testing.T) {
 			reader := newPooledReader()
 			testCase.script(reader)
 
-			factory := new(mockFactory)
-			factory.On("NewReader").Return(reader, nil).Once()
-
-			client := journal.NewClientWithFactory(factory, 1)
+			client, factory := clientWithReader(t, reader, 1)
 
 			filter := zeroFilter()
 			testCase.adjust(&filter)
@@ -353,7 +332,6 @@ func TestQueryPropagatesReaderErrors(t *testing.T) {
 			assert.Nil(t, entries)
 			require.ErrorIs(t, err, assert.AnError)
 
-			require.NoError(t, client.Close())
 			factory.AssertExpectations(t)
 		})
 	}

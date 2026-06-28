@@ -30,7 +30,7 @@ func nonBlankLineTexts(lines []tui.Line) []string {
 func TestRenderAssistantMessagePreservesIndentedCodeBlock(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	app := newTestApp()
 
 	content := "    line one\n    line two"
 
@@ -46,7 +46,7 @@ func TestRenderAssistantMessagePreservesIndentedCodeBlock(t *testing.T) {
 func TestRenderThinkingMessagePreservesIndentedCodeBlock(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	app := newTestApp()
 
 	content := "    line one\n    line two"
 
@@ -66,7 +66,7 @@ func TestRenderThinkingMessagePreservesIndentedCodeBlock(t *testing.T) {
 func TestRenderAssistantMessageTrimsRenderedBlankRows(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	app := newTestApp()
 
 	// Leading and trailing blank source lines plus a body line; the rendered body
 	// must not gain extra blank rows beyond the two surrounding spacers.

@@ -128,7 +128,7 @@ func TestDrawTranscriptHoldsViewportWhileStreaming(t *testing.T) {
 func TestScrollByLiftsTheWindow(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	app := newTestApp()
 
 	app.scrollBy(3)
 	assert.Equal(t, 3, app.scroll, "a positive delta lifts the window")
@@ -143,7 +143,7 @@ func TestScrollByLiftsTheWindow(t *testing.T) {
 func TestScrollByCannotGoBelowZero(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	app := newTestApp()
 	app.dirty = false
 
 	app.scrollBy(-transcriptScrollPage)
@@ -156,7 +156,7 @@ func TestScrollByCannotGoBelowZero(t *testing.T) {
 func TestSubmitSnapsScrollToBottom(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	app := newTestApp()
 	app.scroll = 9
 
 	for _, char := range "hello" {
@@ -173,7 +173,7 @@ func TestSubmitSnapsScrollToBottom(t *testing.T) {
 func TestScrollKeysAdjustOffset(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	app := newTestApp()
 	ctx := context.Background()
 
 	require.False(t, app.handleKey(ctx, tcell.NewEventKey(tcell.KeyPgUp, "", tcell.ModNone)))
@@ -194,7 +194,7 @@ func TestScrollKeysAdjustOffset(t *testing.T) {
 func TestWheelEventsScrollTranscript(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	app := newTestApp()
 	ctx := context.Background()
 
 	require.False(t, app.handleEvent(ctx, tcell.NewEventMouse(0, 0, tcell.WheelUp, tcell.ModNone)))

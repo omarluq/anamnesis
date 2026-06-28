@@ -4,7 +4,7 @@ package scenarios
 // controller loop — the §6 sub-investigation a non-leaf agent.Query spawns. A
 // child runs the same mvm REPL surface as the top-level loop, but it is scoped to
 // one focused sub-question handed down with a bounded context payload, and its
-// budgets (recursion depth, sub-calls, wall time) are shared with the whole tree.
+// budgets (recursion depth and sub-calls) are shared with the whole tree.
 // It guides the child to decompose by delegation — fan a multi-unit, multi-boot, or
 // more-than-~50-entry span out to agent.Query rather than reasoning over raw entries
 // itself — but, unlike the root, it carries no mandatory fan-out: the child recurses
@@ -13,7 +13,7 @@ package scenarios
 // terse FINAL the parent splices back as the sub-call result.
 //
 // The leaf base case (depth == MaxDepth) does NOT use this prompt: it falls back
-// to the flat SubLLMSystemPrompt sub-call, which reasons over the context only.
+// to the flat base-case sub-LLM call, which reasons over the handed-down context only.
 const SubControllerPrompt = "" +
 	"You are a focused sub-investigation controller inside a Recursive Language " +
 	"Model (RLM) loop. A parent investigation handed you one sub-question and a " +
@@ -36,10 +36,10 @@ const SubControllerPrompt = "" +
 	"that analysis to agent.Query or agent.QueryBatched instead of reasoning over raw " +
 	"entries or full histograms yourself. The root controller's mandatory " +
 	"fan-out-before-FINAL rule is NOT yours: you already sit one level deep and share the " +
-	"tree's budget, so fan out only on a genuine multi-unit span — a needless agent.Query " +
-	"wastes budget the parent is counting on.\n" +
-	"- Budgets are SHARED across the whole investigation tree: recursion depth, " +
-	"sub-calls, and wall time are spent jointly with the parent and every sibling. " +
+	"tree's budget, so fan out only on a genuine broad span — multi-unit, multi-boot, or " +
+	">~50-entry — a needless agent.Query wastes budget the parent is counting on.\n" +
+	"- Budgets are SHARED across the whole investigation tree: recursion depth and " +
+	"sub-calls are spent jointly with the parent and every sibling. " +
 	"Stay terse.\n" +
 	"- Ground every claim; never invent a field, unit, timestamp, or cause that is " +
 	"absent from the context and from the journal queries you ran this session.\n" +

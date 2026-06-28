@@ -38,8 +38,8 @@ func TestReplayControllerReplaysScriptStampedWithRunID(t *testing.T) {
 	t.Parallel()
 
 	controller := newReplayController([]TraceEvent{
-		replayLine(TraceKindThinking, "looking", 0),
-		replayLine(TraceKindFinal, "done", 0),
+		traceDepthEvent(TraceKindThinking, "looking", 0),
+		traceDepthEvent(TraceKindFinal, "done", 0),
 	}, 0)
 
 	events := controller.Start(context.Background(), "ignored query", 7)
@@ -59,7 +59,7 @@ func TestReplayControllerLeavesScriptUnmutatedAcrossRuns(t *testing.T) {
 	t.Parallel()
 
 	controller := newReplayController([]TraceEvent{
-		replayLine(TraceKindFinal, "done", 0),
+		traceDepthEvent(TraceKindFinal, "done", 0),
 	}, 0)
 
 	first := drainTrace(t, controller.Start(context.Background(), "q", 1))
@@ -79,8 +79,8 @@ func TestReplayControllerAbandonsRunOnContextCancel(t *testing.T) {
 	cancel()
 
 	controller := newReplayController([]TraceEvent{
-		replayLine(TraceKindThinking, "looking", 0),
-		replayLine(TraceKindFinal, "done", 0),
+		traceDepthEvent(TraceKindThinking, "looking", 0),
+		traceDepthEvent(TraceKindFinal, "done", 0),
 	}, time.Hour)
 
 	got := drainTrace(t, controller.Start(ctx, "q", 1))
@@ -93,8 +93,8 @@ func TestReplayControllerDeliversEventsUnderPace(t *testing.T) {
 
 	pace := 20 * time.Millisecond
 	controller := newReplayController([]TraceEvent{
-		replayLine(TraceKindThinking, "a", 0),
-		replayLine(TraceKindFinal, "b", 0),
+		traceDepthEvent(TraceKindThinking, "a", 0),
+		traceDepthEvent(TraceKindFinal, "b", 0),
 	}, pace)
 
 	start := time.Now()

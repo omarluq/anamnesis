@@ -32,7 +32,7 @@ func TestNewAppDefaultsTitleAndCollapsedState(t *testing.T) {
 func TestFooterTitleAppendsSpinnerOnlyWhileWorking(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	app := newTestApp()
 
 	assert.Equal(t, defaultTitle, app.footerTitle())
 	assert.Empty(t, app.spinnerGlyph())
@@ -52,7 +52,7 @@ func TestFooterTitleAppendsSpinnerOnlyWhileWorking(t *testing.T) {
 func TestApplyTraceBuildsTranscriptAcrossKinds(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	app := newTestApp()
 
 	app.applyTrace(traceDepthEvent(TraceKindThinking, "planning the search", 0))
 	app.applyTrace(traceDepthEvent(TraceKindQueryStart, "summarize the backtrace", 1))
@@ -61,7 +61,6 @@ func TestApplyTraceBuildsTranscriptAcrossKinds(t *testing.T) {
 	pending := app.history[1]
 	assert.Equal(t, transcript.RoleToolResult, pending.Role, "a query start opens a tool-result block")
 	assert.True(t, pending.Pending, "the query block is pending until its end event")
-	assert.Equal(t, 1, pending.Depth, "the query block records its recursion depth")
 
 	app.applyTrace(traceDepthEvent(TraceKindQueryEnd, "the i915 driver oopsed", 1))
 	assert.False(t, app.history[1].Pending, "the query end settles the pending block")
@@ -77,7 +76,7 @@ func TestApplyTraceBuildsTranscriptAcrossKinds(t *testing.T) {
 func TestApplyTraceStreamsThinkingDeltasThenSettles(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	app := newTestApp()
 
 	// Reasoning streams in as deltas, growing one pending thinking block in place.
 	app.applyTrace(traceEvent(TraceKindThinkingDelta, "Listing the ", 0))
@@ -101,7 +100,7 @@ func TestApplyTraceStreamsThinkingDeltasThenSettles(t *testing.T) {
 func TestApplyTraceThinkingWithoutDeltasAppendsFreshBlock(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	app := newTestApp()
 
 	// No deltas streamed (the model returned no reasoning summary) → the terse fallback
 	// thinking appends as a fresh, already-settled block.
@@ -116,7 +115,7 @@ func TestApplyTraceThinkingWithoutDeltasAppendsFreshBlock(t *testing.T) {
 func TestApplyTraceCodeEventsRenderAsToolBlock(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	app := newTestApp()
 
 	code := "boots := journal.Boots()\nfmt.Println(len(boots))"
 	app.applyTrace(traceEvent(TraceKindCodeStart, code, 0))
@@ -145,7 +144,7 @@ func TestApplyTraceCodeEventsRenderAsToolBlock(t *testing.T) {
 func TestApplyTraceCodeErrorRendersRedToolBlock(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	app := newTestApp()
 
 	app.applyTrace(traceEvent(TraceKindCodeStart, "journal.Query(\"bad syntax\")", 0))
 	require.True(t, app.history[0].Pending, "a code start opens a pending block")
@@ -177,7 +176,7 @@ func TestApplyTraceCodeErrorRendersRedToolBlock(t *testing.T) {
 func TestApplyTraceFinalAppendsAssistantAndClearsSpinner(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	app := newTestApp()
 
 	app.applyTrace(traceEvent(TraceKindThinking, "investigating", 0))
 	require.True(t, app.working)
@@ -219,7 +218,7 @@ func TestApplyTraceQueryEventsKeepWorkingUntilFinal(t *testing.T) {
 func TestApplyTraceQueryEndsCorrelateByQueryID(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	app := newTestApp()
 
 	// Sibling sub-calls fan out at one depth, each carrying its own correlation id.
 	queryEvent := func(kind TraceKind, text string, queryID uint64) TraceEvent {
@@ -259,7 +258,7 @@ func TestApplyTraceQueryEndsCorrelateByQueryID(t *testing.T) {
 func TestApplyTraceJudgeApprovalRendersGreen(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	app := newTestApp()
 
 	app.applyTrace(traceEvent(TraceKindJudgeStart, "the resolved answer", 0))
 
@@ -286,7 +285,7 @@ func TestApplyTraceJudgeApprovalRendersGreen(t *testing.T) {
 func TestApplyTraceJudgeCritiqueRendersAmberNotRed(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	app := newTestApp()
 
 	app.applyTrace(traceEvent(TraceKindJudgeStart, "the resolved answer", 0))
 	app.applyTrace(traceEvent(TraceKindJudgeEnd, "cite the boot the panic came from", 0))
@@ -304,7 +303,7 @@ func TestApplyTraceJudgeCritiqueRendersAmberNotRed(t *testing.T) {
 func TestQueryToggleRevealsContentWithThinkingAlwaysShown(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	app := newTestApp()
 
 	app.applyTrace(traceDepthEvent(TraceKindThinking, "weighing the boots", 0))
 	app.applyTrace(traceDepthEvent(TraceKindQueryStart, "inspect boot 3", 1))
@@ -354,7 +353,7 @@ func TestStartRunBeginsControllerRunAndIgnoresSubmitWhileWorking(t *testing.T) {
 func TestStartRunWithoutControllerStaysIdle(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	app := newTestApp()
 
 	app.startRun(context.Background(), "question")
 
@@ -384,8 +383,7 @@ func TestStartRunCancelsRunContextOnLoopExit(t *testing.T) {
 
 	app := newApp(screen, RunOptions{Trace: nil, Controller: ctrl, Title: defaultTitle})
 
-	done := make(chan error, 1)
-	go func() { done <- app.loop(context.Background()) }()
+	done := startLoop(app)
 
 	submitQuery(screen, "why did it crash")
 	screen.inject(tcell.NewEventKey(tcell.KeyCtrlC, "", tcell.ModNone))
@@ -398,39 +396,32 @@ func TestStartRunCancelsRunContextOnLoopExit(t *testing.T) {
 		"the run's child context is canceled when the loop exits on the quit-key path")
 }
 
-func TestLoopQuitsOnCtrlC(t *testing.T) {
+func TestLoopQuitsOnKey(t *testing.T) {
 	t.Parallel()
 
-	screen := newFakeScreen(80, 24)
-	screen.inject(tcell.NewEventKey(tcell.KeyCtrlC, "", tcell.ModNone))
+	tests := []struct {
+		event tcell.Event
+		name  string
+	}{
+		{event: tcell.NewEventKey(tcell.KeyCtrlC, "", tcell.ModNone), name: "ctrl+c"},
+		{event: tcell.NewEventKey(tcell.KeyEscape, "", tcell.ModNone), name: "escape"},
+		{event: runeKey("q"), name: "q on an empty composer"},
+	}
 
-	app := newApp(screen, RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
-	require.NoError(t, app.loop(context.Background()))
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 
-	assert.GreaterOrEqual(t, screen.showCount(), 1, "the loop drew at least one frame before quitting")
-	assert.Contains(t, screen.contents(), defaultTitle, "the rendered footer shows the title")
-}
+			screen := newFakeScreen(80, 24)
+			screen.inject(test.event)
 
-func TestLoopQuitsOnEscape(t *testing.T) {
-	t.Parallel()
+			app := newApp(screen, RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+			require.NoError(t, app.loop(context.Background()))
 
-	screen := newFakeScreen(80, 24)
-	screen.inject(tcell.NewEventKey(tcell.KeyEscape, "", tcell.ModNone))
-
-	app := newApp(screen, RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
-
-	require.NoError(t, app.loop(context.Background()))
-}
-
-func TestLoopQuitsOnQWhenComposerEmpty(t *testing.T) {
-	t.Parallel()
-
-	screen := newFakeScreen(80, 24)
-	screen.inject(runeKey("q"))
-
-	app := newApp(screen, RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
-
-	require.NoError(t, app.loop(context.Background()))
+			assert.GreaterOrEqual(t, screen.showCount(), 1, "the loop drew at least one frame before quitting")
+			assert.Contains(t, screen.contents(), defaultTitle, "the rendered footer shows the title")
+		})
+	}
 }
 
 func TestLoopTreatsQAsTextWhenComposerHasContent(t *testing.T) {
@@ -445,7 +436,7 @@ func TestLoopTreatsQAsTextWhenComposerHasContent(t *testing.T) {
 	require.NoError(t, app.loop(context.Background()))
 
 	assert.False(t, app.composer.Empty())
-	assert.Equal(t, "hq", app.composer.TextValue(), "q was inserted as text, not consumed as a quit key")
+	assert.Equal(t, "hq", app.composer.Text, "q was inserted as text, not consumed as a quit key")
 }
 
 func TestLoopReturnsOnContextCancel(t *testing.T) {
@@ -509,8 +500,7 @@ func TestLoopAppliesMatchingTraceAndIgnoresStaleRunID(t *testing.T) {
 	app := newApp(screen, RunOptions{Trace: traceCh, Controller: nil, Title: defaultTitle})
 	require.Equal(t, uint64(0), app.runID)
 
-	done := make(chan error, 1)
-	go func() { done <- app.loop(context.Background()) }()
+	done := startLoop(app)
 
 	// Matching RunID (0): the final answer appends to the transcript.
 	sendTrace(t, traceCh, traceEvent(TraceKindFinal, "answer", 0))
@@ -555,8 +545,7 @@ func TestAppRendersTranscriptComposerFooterAndQuits(t *testing.T) {
 
 	app := newApp(screen, RunOptions{Trace: traceCh, Controller: nil, Title: defaultTitle})
 
-	done := make(chan error, 1)
-	go func() { done <- app.loop(context.Background()) }()
+	done := startLoop(app)
 
 	sendTrace(t, traceCh, traceEvent(TraceKindFinal, "final answer", 0))
 	awaitContents(t, screen, "final answer")

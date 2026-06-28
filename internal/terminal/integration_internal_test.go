@@ -1,7 +1,6 @@
 package terminal
 
 import (
-	"context"
 	"testing"
 
 	"github.com/gdamore/tcell/v3"
@@ -39,8 +38,7 @@ func TestAppIntegrationReplayDrivesTranscriptAndDropsStaleRunID(t *testing.T) {
 
 	app := newApp(screen, RunOptions{Trace: ambient, Controller: controller, Title: defaultTitle})
 
-	done := make(chan error, 1)
-	go func() { done <- app.loop(context.Background()) }()
+	done := startLoop(app)
 
 	// A superseded run's final answer arrives on the run-zero channel and is gated
 	// out by RunID before it can touch the transcript.

@@ -57,6 +57,15 @@ func (b *lockedBuffer) String() string {
 	return b.buf.String()
 }
 
+// Len returns the buffer's accumulated byte count under the lock, a race-free read the
+// EvalContext idle watchdog samples as a progress signal without copying the contents.
+func (b *lockedBuffer) Len() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.Len()
+}
+
 // Reset clears the buffer under the lock so the next turn starts with empty output.
 func (b *lockedBuffer) Reset() {
 	b.mu.Lock()

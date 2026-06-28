@@ -59,11 +59,12 @@ const critiqueHeader = "JUDGE CRITIQUE (revise the final answer and call agent.F
 // narrow contract rather than on the concrete interpreter.
 type EvalCapture interface {
 	// EvalContext runs src under the label name against the persistent session
-	// state, bounded by timeout and any deadline on ctx, returning the captured
-	// stdout, the final expression's value, and any evaluation error. A
-	// non-terminating turn surfaces as an eval_timed_out error carrying the partial
-	// stdout printed before it wedged; the interpreter is then poisoned and must not
-	// be reused, so the loop force-finishes on that fault.
+	// state, guarded by an idle-progress watchdog whose window is timeout and by ctx,
+	// returning the captured stdout, the final expression's value, and any evaluation
+	// error. A turn that makes no progress within its idle window surfaces as an
+	// eval_timed_out error carrying the partial stdout printed before it wedged; the
+	// interpreter is then poisoned and must not be reused, so the loop force-finishes
+	// on that fault.
 	EvalContext(ctx context.Context, timeout time.Duration, name, src string) (repl.Result, error)
 	// Final resolves the terminal answer once controller code has called
 	// agent.FINAL or agent.FINAL_VAR: the recorded literal for FINAL, or the
@@ -160,18 +161,15 @@ func (controller *Controller) Run(ctx context.Context) (string, error) {
 // caps the revision, so the gate settles after at most one extra pass.
 //
 // Only a model-signaled agent.FINAL is audited, and a grounded FINAL is never
-// downgraded. A force-finished pass — the soft deadline, an exhausted turn budget, an
-// eval timeout, or the hard wall-time backstop canceling the context — yields an
-// honest "investigation incomplete" note, not a grounded conclusion. So the loop
-// remembers the last grounded FINAL: if a later pass force-finishes (most often the
-// §5 revision running out the turn budget), RunAudited renders that remembered FINAL
-// rather than replacing it with the incomplete note; only when no pass ever finalized
-// is the note itself the honest result. This keeps the judge off a non-answer and
-// keeps a critique-then-force-finish from silently erasing a sound answer. The
-// revision pass also runs past the soft deadline under the hard ctx alone (see
-// reserveTurnOrFinish), so the rewrite gets a real chance at a fresh FINAL before the
-// turn budget bounds it. It returns an error when the loop fails, a cited cursor was
-// never made visible, or the judge call fails.
+// downgraded. A force-finished pass — the caller canceling ctx (the user quits) or a
+// turn's eval idling out its per-eval progress watchdog — yields an honest
+// "investigation incomplete" note, not a grounded conclusion. So the loop remembers
+// the last grounded FINAL: if a later pass force-finishes, RunAudited renders that
+// remembered FINAL rather than replacing it with the incomplete note; only when no
+// pass ever finalized is the note itself the honest result. This keeps the judge off a
+// non-answer and keeps a critique-then-force-finish from silently erasing a sound
+// answer. It returns an error when the loop fails, a cited cursor was never made
+// visible, or the judge call fails.
 func (controller *Controller) RunAudited(ctx context.Context) (string, error) {
 	var (
 		lastFinal string
@@ -196,9 +194,9 @@ func (controller *Controller) RunAudited(ctx context.Context) (string, error) {
 
 		lastFinal, finalized = answer, true
 
-		// The §6 hard wall-time backstop canceled the run after this FINAL resolved:
-		// auditing on a dead context would only fail the judge with a deadline error, so
-		// render the resolved answer rather than turning a timeout into an error.
+		// The caller canceled ctx after this FINAL resolved: auditing on a dead context
+		// would only fail the judge with a cancellation error, so render the resolved
+		// answer rather than turning the cancel into an error.
 		select {
 		case <-ctx.Done():
 			return answer, nil
@@ -334,8 +332,8 @@ func (controller *Controller) forceFinish(reason forceFinishReason) string {
 func (controller *Controller) forceFinishNote() string {
 	turns := len(controller.session.History)
 	if turns == 0 {
-		return "The investigation was stopped at its wall-clock budget before it ran " +
-			"a single turn, so there is nothing to report."
+		return "The investigation was canceled before it ran a single turn, so there " +
+			"is nothing to report."
 	}
 
 	return fmt.Sprintf(
@@ -477,9 +475,9 @@ func thinkingTrace(response openai.ControllerResponse) string {
 }
 
 // evalTurn runs the turn's generated Go through the interpreter under the §6 per-eval
-// timeout, recovering an over-budget agent.Query panic (SPEC §6) into an error so a
-// saturated sub-call or recursion-depth budget surfaces on the turn's Err field
-// rather than unwinding the whole loop. A non-terminating turn comes back from
+// idle watchdog, recovering an over-budget agent.Query panic (SPEC §6) into an error so
+// a saturated sub-call or recursion-depth budget surfaces on the turn's Err field
+// rather than unwinding the whole loop. A turn that idles out comes back from
 // EvalContext as the eval_timed_out fault, which evalTimedOut tells apart from this
 // recoverable panic.
 func (controller *Controller) evalTurn(ctx context.Context, label, code string) (result repl.Result, err error) {

@@ -3,16 +3,12 @@ package openai_test
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"strings"
 	"testing"
 	"unicode/utf8"
 
-	openaisdk "github.com/openai/openai-go/v3"
-	"github.com/samber/oops"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/omarluq/anamnesis/internal/openai"
@@ -35,40 +31,18 @@ func subResponseBody(t *testing.T, reply string) string {
 	return completedStream(t, reply)
 }
 
-// captureSubRequest drives one Sub call through a mock transport that records the
-// outgoing request body during RoundTrip, returning that raw body so a test can
-// assert on what actually went over the wire (size after truncation, model id).
-// The canned reply is fixed because callers assert on the request, not the reply.
+// captureSubRequest drives one Sub call through captureRequest with a fixed canned
+// reply, returning the raw outgoing request body so a test can assert on what
+// actually went over the wire (size after truncation, model id). The canned reply
+// is fixed because callers assert on the request, not the reply.
 func captureSubRequest(t *testing.T, prompt, evidence string) []byte {
 	t.Helper()
 
-	var body []byte
+	return captureRequest(t, subResponseBody(t, "ok"), func(client *openai.Client) error {
+		_, err := client.Sub(context.Background(), prompt, evidence)
 
-	transport := new(mockTransport)
-	transport.
-		On("RoundTrip", mock.Anything).
-		Run(func(args mock.Arguments) {
-			req, ok := args.Get(0).(*http.Request)
-			require.True(t, ok, "RoundTrip receives an *http.Request")
-			require.NotNil(t, req.Body, "the sub-call carries a request body")
-
-			raw, err := io.ReadAll(req.Body)
-			require.NoError(t, err)
-
-			body = raw
-		}).
-		Return(http.StatusOK, subResponseBody(t, "ok"), nil).
-		Once()
-
-	client := newControllerClient(t, transport)
-
-	_, err := client.Sub(context.Background(), prompt, evidence)
-	require.NoError(t, err)
-
-	transport.AssertExpectations(t)
-	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
-
-	return body
+		return err
+	})
 }
 
 func TestSubReturnsTextReply(t *testing.T) {
@@ -76,13 +50,7 @@ func TestSubReturnsTextReply(t *testing.T) {
 
 	const reply = "sshd failed at 09:01: port 22 already in use; the prior instance never released it."
 
-	transport := new(mockTransport)
-	transport.
-		On("RoundTrip", mock.Anything).
-		Return(http.StatusOK, subResponseBody(t, reply), nil).
-		Once()
-
-	client := newControllerClient(t, transport)
+	client, transport := newClientServing(t, http.StatusOK, subResponseBody(t, reply))
 
 	result, err := client.Sub(
 		context.Background(),
@@ -92,6 +60,25 @@ func TestSubReturnsTextReply(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, reply, result.Text, "the sub-LLM text reply round-trips")
+
+	transport.AssertExpectations(t)
+	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
+}
+
+// assertSubTurnFails drives one Sub call whose streamed response is streamBody and
+// asserts the sub-call fails with the zero result under wantCode — the mirror of
+// assertControllerTurnFails for the sub role.
+func assertSubTurnFails(t *testing.T, streamBody, wantCode string) {
+	t.Helper()
+
+	client, transport := newClientServing(t, http.StatusOK, streamBody)
+
+	result, err := client.Sub(context.Background(), "Summarize the failures.", "[]journal.Entry{}")
+	require.Error(t, err)
+
+	assert.Equal(t, openai.SubResult{Text: ""}, result, "a failed sub-call yields the zero result")
+
+	assertOpenAICode(t, err, wantCode)
 
 	transport.AssertExpectations(t)
 	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
@@ -153,35 +140,12 @@ func TestSubTruncationKeepsValidUTF8AtMultibyteBoundary(t *testing.T) {
 func TestSubSurfacesModelNotFoundWithNoFallback(t *testing.T) {
 	t.Parallel()
 
-	const errorBody = `{"error":{"message":"The model gpt-5.5 does not exist or you do not have access to it.",` +
-		`"type":"invalid_request_error","param":null,"code":"model_not_found"}}`
+	assertModelNotFoundSurface(t, "sub_call_failed", func(client *openai.Client) error {
+		result, err := client.Sub(context.Background(), "Summarize the failures.", "[]journal.Entry{}")
+		assert.Equal(t, openai.SubResult{Text: ""}, result, "a failed sub-call yields the zero result")
 
-	transport := new(mockTransport)
-	transport.
-		On("RoundTrip", mock.Anything).
-		Return(http.StatusNotFound, errorBody, nil).
-		Once()
-
-	client := newControllerClient(t, transport)
-
-	result, err := client.Sub(context.Background(), "Summarize the failures.", "[]journal.Entry{}")
-	require.Error(t, err)
-
-	assert.Equal(t, openai.SubResult{Text: ""}, result, "a failed sub-call yields the zero result")
-
-	oopsErr, ok := oops.AsOops(err)
-	require.True(t, ok, "the error is oops-wrapped")
-	assert.Equal(t, "openai", oopsErr.Domain())
-	assert.Equal(t, "sub_call_failed", oopsErr.Code())
-
-	var apiErr *openaisdk.Error
-
-	require.ErrorAs(t, err, &apiErr, "the gpt-5.5 rejection surfaces as an openai API error")
-	assert.Equal(t, "model_not_found", apiErr.Code)
-	assert.Equal(t, http.StatusNotFound, apiErr.StatusCode)
-
-	transport.AssertExpectations(t)
-	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
+		return err
+	})
 }
 
 func TestSubSurfacesIncompleteTruncationError(t *testing.T) {
@@ -191,27 +155,7 @@ func TestSubSurfacesIncompleteTruncationError(t *testing.T) {
 	// can truncate before the answer is complete. Sub now streams, so that terminal
 	// response.incomplete surfaces as sub_incomplete rather than a silently shortened
 	// answer — the guard the blocking one-shot call lacked.
-	transport := new(mockTransport)
-	transport.
-		On("RoundTrip", mock.Anything).
-		Return(http.StatusOK, incompleteStream(t, "sshd failed because"), nil).
-		Once()
-
-	client := newControllerClient(t, transport)
-
-	result, err := client.Sub(context.Background(), "Summarize the failures.", "[]journal.Entry{}")
-	require.Error(t, err)
-
-	assert.Equal(t, openai.SubResult{Text: ""}, result, "a truncated sub-call yields the zero result")
-
-	oopsErr, ok := oops.AsOops(err)
-	require.True(t, ok, "the error is oops-wrapped")
-	assert.Equal(t, "openai", oopsErr.Domain())
-	assert.Equal(t, "sub_incomplete", oopsErr.Code(),
-		"a truncated sub-reply surfaces as sub_incomplete, not a silently shortened answer")
-
-	transport.AssertExpectations(t)
-	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
+	assertSubTurnFails(t, incompleteStream(t, "sshd failed because"), "sub_incomplete")
 }
 
 func TestSubRequestUsesFlagshipModel(t *testing.T) {

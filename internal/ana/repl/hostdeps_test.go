@@ -4,119 +4,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/samber/oops"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/omarluq/anamnesis/internal/ana/journal"
 	"github.com/omarluq/anamnesis/internal/ana/repl"
+	"github.com/omarluq/anamnesis/internal/ana/repl/repltest"
 	"github.com/omarluq/anamnesis/internal/ana/systemd"
 )
 
 // unitSSH is the unit name the test queries and statuses; hoisted to a constant
 // so the surrounding mock setup and assertions share one literal.
 const unitSSH = "ssh.service"
-
-// mockJournalSurface is a testify mock of the repl.Journal host surface. Every
-// method is a recorded seam scripted with .On(...).Return(...); the REPL bridge
-// reflects the interface's methods into journal.Query and friends, so a testify
-// mock is the right double rather than a bespoke fake.
-type mockJournalSurface struct {
-	mock.Mock
-}
-
-// Boots replays the []journal.BootInfo scripted via .On("Boots").Return(boots).
-func (m *mockJournalSurface) Boots() []journal.BootInfo {
-	args := m.Called()
-
-	boots, ok := args.Get(0).([]journal.BootInfo)
-	if !ok {
-		return nil
-	}
-
-	return boots
-}
-
-// Query records filter and replays the []journal.Entry scripted via
-// .On("Query", filter).Return(entries).
-func (m *mockJournalSurface) Query(filter *journal.QueryFilter) []journal.Entry {
-	args := m.Called(filter)
-
-	entries, ok := args.Get(0).([]journal.Entry)
-	if !ok {
-		return nil
-	}
-
-	return entries
-}
-
-// Counts records its arguments and replays the histogram scripted via
-// .On("Counts", bootID, byField).Return(counts).
-func (m *mockJournalSurface) Counts(bootID, byField string) map[string]int {
-	args := m.Called(bootID, byField)
-
-	counts, ok := args.Get(0).(map[string]int)
-	if !ok {
-		return nil
-	}
-
-	return counts
-}
-
-// Unique records its arguments and replays the values scripted via
-// .On("Unique", field, filter).Return(values).
-func (m *mockJournalSurface) Unique(field string, filter *journal.QueryFilter) []string {
-	args := m.Called(field, filter)
-
-	values, ok := args.Get(0).([]string)
-	if !ok {
-		return nil
-	}
-
-	return values
-}
-
-// mockSystemdSurface is a testify mock of the repl.Systemd host surface. The
-// bridge reflects its methods into systemd.UnitStatus and systemd.ListUnits, so
-// the test scripts them with .On(...).Return(...).
-type mockSystemdSurface struct {
-	mock.Mock
-}
-
-// UnitStatus records name and replays the systemd.UnitStatus scripted via
-// .On("UnitStatus", name).Return(status).
-func (m *mockSystemdSurface) UnitStatus(name string) systemd.UnitStatus {
-	args := m.Called(name)
-
-	status, ok := args.Get(0).(systemd.UnitStatus)
-	if !ok {
-		var zero systemd.UnitStatus
-
-		return zero
-	}
-
-	return status
-}
-
-// ListUnits records state and replays the []systemd.Unit scripted via
-// .On("ListUnits", state).Return(units).
-func (m *mockSystemdSurface) ListUnits(state string) []systemd.Unit {
-	args := m.Called(state)
-
-	units, ok := args.Get(0).([]systemd.Unit)
-	if !ok {
-		return nil
-	}
-
-	return units
-}
-
-// Compile-time assertions that the mocks satisfy the host surfaces they double.
-var (
-	_ repl.Journal = (*mockJournalSurface)(nil)
-	_ repl.Systemd = (*mockSystemdSurface)(nil)
-)
 
 // TestHostDepsRegistersJournalAndSystemd builds a HostDeps from mock journal and
 // systemd surfaces, registers them on a fresh interpreter, then evaluates
@@ -130,7 +30,7 @@ func TestHostDepsRegistersJournalAndSystemd(t *testing.T) {
 
 	interpreter := repl.NewInterpreter()
 
-	journalSurface := new(mockJournalSurface)
+	journalSurface := new(repltest.MockJournal)
 	journalSurface.On("Query", mock.Anything).Return([]journal.Entry{
 		{
 			Timestamp: time.Date(2021, time.March, 1, 9, 0, 0, 0, time.UTC),
@@ -156,7 +56,7 @@ func TestHostDepsRegistersJournalAndSystemd(t *testing.T) {
 		},
 	})
 
-	systemdSurface := new(mockSystemdSurface)
+	systemdSurface := new(repltest.MockSystemd)
 	systemdSurface.On("UnitStatus", unitSSH).Return(systemd.UnitStatus{
 		Name:        unitSSH,
 		Description: "OpenSSH server daemon",
@@ -204,16 +104,12 @@ func TestHostDepsRegisterReportsNilSurface(t *testing.T) {
 
 	interpreter := repl.NewInterpreter()
 
-	deps := repl.HostDeps{Journal: nil, Systemd: new(mockSystemdSurface)}
+	deps := repl.HostDeps{Journal: nil, Systemd: new(repltest.MockSystemd)}
 
 	err := deps.Register(interpreter)
 	require.Error(t, err)
 
-	var oopsErr oops.OopsError
-
-	require.ErrorAs(t, err, &oopsErr)
-	assert.Equal(t, "repl", oopsErr.Domain())
-	assert.Equal(t, "host_surface_nil", oopsErr.Code())
+	repltest.RequireOopsCode(t, err, "repl", "host_surface_nil")
 }
 
 // TestHostDepsExposesFullMethodSet proves the reflection-based registration exposes
@@ -225,7 +121,7 @@ func TestHostDepsExposesFullMethodSet(t *testing.T) {
 
 	interpreter := repl.NewInterpreter()
 
-	journalSurface := new(mockJournalSurface)
+	journalSurface := new(repltest.MockJournal)
 	journalSurface.On("Boots").Return([]journal.BootInfo{
 		{
 			FirstSeen: time.Date(2021, time.March, 1, 9, 0, 0, 0, time.UTC),
@@ -235,7 +131,7 @@ func TestHostDepsExposesFullMethodSet(t *testing.T) {
 		},
 	})
 
-	systemdSurface := new(mockSystemdSurface)
+	systemdSurface := new(repltest.MockSystemd)
 	systemdSurface.On("ListUnits", "").Return([]systemd.Unit{
 		{
 			Name:        "cron.service",

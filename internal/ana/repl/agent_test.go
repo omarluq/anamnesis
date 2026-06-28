@@ -10,6 +10,7 @@ import (
 
 	"github.com/omarluq/anamnesis/internal/ana/journal"
 	"github.com/omarluq/anamnesis/internal/ana/repl"
+	"github.com/omarluq/anamnesis/internal/ana/repl/repltest"
 )
 
 // mockCitationSink is a testify mock of the repl.CitationSink seam. agent.Cite
@@ -106,10 +107,10 @@ func TestAgentCiteForwardsEntriesToSink(t *testing.T) {
 		citedEntry("s=cursor-cite-2", "checkout-api main process exited"),
 	}
 
-	journalSurface := new(mockJournalSurface)
+	journalSurface := new(repltest.MockJournal)
 	journalSurface.On("Query", mock.Anything).Return(entries)
 
-	deps := repl.HostDeps{Journal: journalSurface, Systemd: new(mockSystemdSurface)}
+	deps := repl.HostDeps{Journal: journalSurface, Systemd: new(repltest.MockSystemd)}
 	require.NoError(t, deps.Register(interpreter))
 
 	sink := new(mockCitationSink)

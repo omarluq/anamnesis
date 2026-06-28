@@ -26,8 +26,8 @@ const (
 // evidence and returns the reply text, so the repl package forwards sub-calls to
 // the real internal/openai sub-LLM caller in production and to a testify mock
 // under test. The seam carries no context.Context: a session threads cancellation
-// and the §6 wall-time budget through a closure around the live client, keeping
-// the agent layer free of a stored context.
+// through a closure around the live client, keeping the agent layer free of a stored
+// context.
 type SubLLM interface {
 	// Sub answers prompt over the rendered evidence and returns the reply text.
 	Sub(prompt, evidence string) (string, error)
@@ -39,7 +39,7 @@ type SubLLM interface {
 type QueryBudget struct {
 	// MaxDepth is the deepest recursion level a sub-call may run at (§6: 3).
 	MaxDepth int
-	// MaxSubCalls is the most sub-calls a session may spend in total (§6: 30).
+	// MaxSubCalls is the most sub-calls a session may spend in total (§6: 60).
 	MaxSubCalls int
 }
 
@@ -216,8 +216,13 @@ func (runner *queryRunner) failOnAny(failures []error) {
 }
 
 // callSub renders ctx into evidence and makes one sub-LLM call through the seam,
-// returning the reply and any error for the caller to act on.
+// returning the reply and any error for the caller to act on. It bumps the
+// interpreter's tree-wide progress counter first, so the EvalContext idle watchdog
+// counts every sub-call dispatch as progress — a wide or slow fan-out is busy work,
+// not a wedge, and must not be force-finished as if it had stalled.
 func (runner *queryRunner) callSub(prompt string, ctx any) (string, error) {
+	runner.interpreter.progress.Add(1)
+
 	return runner.sub.Sub(prompt, renderEvidence(ctx))
 }
 

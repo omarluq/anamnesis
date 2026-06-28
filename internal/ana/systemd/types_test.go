@@ -16,24 +16,6 @@ const (
 	subStateRunning   = "running"
 )
 
-func TestUnitFields(t *testing.T) {
-	t.Parallel()
-
-	unit := systemd.Unit{
-		Name:        "nginx.service",
-		Description: "A high performance web server",
-		LoadState:   loadStateLoaded,
-		ActiveState: activeStateActive,
-		SubState:    subStateRunning,
-	}
-
-	assert.Equal(t, "nginx.service", unit.Name)
-	assert.Equal(t, "A high performance web server", unit.Description)
-	assert.Equal(t, loadStateLoaded, unit.LoadState)
-	assert.Equal(t, activeStateActive, unit.ActiveState)
-	assert.Equal(t, subStateRunning, unit.SubState)
-}
-
 func TestUnitStatusFields(t *testing.T) {
 	t.Parallel()
 

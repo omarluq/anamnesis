@@ -5,7 +5,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/samber/oops"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -14,8 +13,9 @@ import (
 )
 
 // mockReader is a testify mock of the journal.Reader seam. The pool lifecycle
-// only drives FlushMatches and Close across acquire/release/close; the query-side
-// methods exist to satisfy the interface and are never exercised here.
+// drives FlushMatches on every release and Close when it drops an overflowing
+// Reader; the query-side methods exist to satisfy the interface and are exercised
+// by the behavioral tests in the sibling files.
 type mockReader struct {
 	mock.Mock
 }
@@ -23,11 +23,6 @@ type mockReader struct {
 // AddMatch records the match argument and replays the scripted error.
 func (m *mockReader) AddMatch(match string) error {
 	return m.Called(match).Error(0)
-}
-
-// AddDisjunction replays the scripted error.
-func (m *mockReader) AddDisjunction() error {
-	return m.Called().Error(0)
 }
 
 // SeekHead replays the scripted error.
@@ -94,11 +89,14 @@ func (m *mockFactory) NewReader() (journal.Reader, error) {
 var _ journal.ReaderFactory = (*mockFactory)(nil)
 
 // newPooledReader returns a mock Reader that tolerates the pool's lifecycle calls:
-// FlushMatches on every release and Close when the pool drops the Reader.
+// FlushMatches on every release, and Close on the overflow path where the pool
+// drops a Reader rather than pooling it. Close is marked optional with Maybe
+// because the pool leaves an idle Reader open for the process's life, so most
+// tests release their Reader back into the pool and never see it closed.
 func newPooledReader() *mockReader {
 	reader := new(mockReader)
 	reader.On("FlushMatches").Return()
-	reader.On("Close").Return(nil)
+	reader.On("Close").Return(nil).Maybe()
 
 	return reader
 }
@@ -107,11 +105,7 @@ func TestClientAcquireReleaseReusesIdleReader(t *testing.T) {
 	t.Parallel()
 
 	reader := newPooledReader()
-
-	factory := new(mockFactory)
-	factory.On("NewReader").Return(reader, nil).Once()
-
-	client := journal.NewClientWithFactory(factory, 4)
+	client, factory := clientWithReader(t, reader, 4)
 
 	first, err := client.Acquire()
 	require.NoError(t, err)
@@ -124,73 +118,10 @@ func TestClientAcquireReleaseReusesIdleReader(t *testing.T) {
 	assert.Same(t, first, second, "release then acquire must reuse the idle reader")
 
 	require.NoError(t, client.Release(second))
-	require.NoError(t, client.Close())
 
 	factory.AssertExpectations(t)
 	factory.AssertNumberOfCalls(t, "NewReader", 1)
 	reader.AssertCalled(t, "FlushMatches")
-	reader.AssertNumberOfCalls(t, "Close", 1)
-}
-
-func TestClientCloseReleasesEveryReader(t *testing.T) {
-	t.Parallel()
-
-	readers := []*mockReader{newPooledReader(), newPooledReader(), newPooledReader()}
-
-	factory := new(mockFactory)
-	for _, reader := range readers {
-		factory.On("NewReader").Return(reader, nil).Once()
-	}
-
-	client := journal.NewClientWithFactory(factory, len(readers))
-
-	held := make([]journal.Reader, 0, len(readers))
-
-	for range readers {
-		reader, err := client.Acquire()
-		require.NoError(t, err)
-
-		held = append(held, reader)
-	}
-
-	for _, reader := range held {
-		require.NoError(t, client.Release(reader))
-	}
-
-	require.NoError(t, client.Close())
-
-	for _, reader := range readers {
-		reader.AssertNumberOfCalls(t, "Close", 1)
-	}
-
-	// Close is idempotent and must not double-close any pooled reader.
-	require.NoError(t, client.Close())
-
-	for _, reader := range readers {
-		reader.AssertNumberOfCalls(t, "Close", 1)
-	}
-
-	factory.AssertExpectations(t)
-}
-
-func TestClientAcquireAfterCloseReturnsClosedError(t *testing.T) {
-	t.Parallel()
-
-	factory := new(mockFactory)
-
-	client := journal.NewClientWithFactory(factory, 2)
-	require.NoError(t, client.Close())
-
-	reader, err := client.Acquire()
-	assert.Nil(t, reader)
-	require.Error(t, err)
-
-	var oopsErr oops.OopsError
-
-	require.ErrorAs(t, err, &oopsErr)
-	assert.Equal(t, "client_closed", oopsErr.Code())
-
-	factory.AssertNotCalled(t, "NewReader")
 }
 
 func TestClientAcquirePropagatesFactoryError(t *testing.T) {
@@ -208,28 +139,7 @@ func TestClientAcquirePropagatesFactoryError(t *testing.T) {
 	factory.AssertExpectations(t)
 }
 
-func TestClientReleaseAfterCloseClosesReader(t *testing.T) {
-	t.Parallel()
-
-	reader := newPooledReader()
-
-	factory := new(mockFactory)
-	factory.On("NewReader").Return(reader, nil).Once()
-
-	client := journal.NewClientWithFactory(factory, 2)
-
-	acquired, err := client.Acquire()
-	require.NoError(t, err)
-
-	require.NoError(t, client.Close())
-	require.NoError(t, client.Release(acquired))
-
-	reader.AssertCalled(t, "FlushMatches")
-	reader.AssertNumberOfCalls(t, "Close", 1)
-	factory.AssertExpectations(t)
-}
-
-func TestClientReleaseOverflowClosesReaderWhileOpen(t *testing.T) {
+func TestClientReleaseOverflowClosesReader(t *testing.T) {
 	t.Parallel()
 
 	pooled := newPooledReader()
@@ -253,76 +163,14 @@ func TestClientReleaseOverflowClosesReaderWhileOpen(t *testing.T) {
 	// The first release fills the lone idle slot.
 	require.NoError(t, client.Release(first))
 
-	// The second release overflows the bound while the client is still open, so the
-	// reader is closed instead of pooled.
+	// The second release overflows the bound, so the reader is closed instead of
+	// pooled.
 	require.NoError(t, client.Release(second))
 
 	overflow.AssertNumberOfCalls(t, "Close", 1)
 	pooled.AssertNumberOfCalls(t, "Close", 0)
 
-	require.NoError(t, client.Close())
 	factory.AssertExpectations(t)
-}
-
-// blockingFactory opens a Reader but blocks each NewReader call until released, so a
-// test can wedge a Close between Acquire's closed-check and the factory open that
-// follows it. entered closes once NewReader is reached; release unblocks the open.
-type blockingFactory struct {
-	reader  journal.Reader
-	entered chan struct{}
-	release chan struct{}
-}
-
-// NewReader signals that the open was reached, blocks until released, then returns
-// the scripted Reader.
-func (f *blockingFactory) NewReader() (journal.Reader, error) {
-	close(f.entered)
-	<-f.release
-
-	return f.reader, nil
-}
-
-// acquireResult carries an Acquire outcome back from the worker goroutine.
-type acquireResult struct {
-	reader journal.Reader
-	err    error
-}
-
-func TestClientAcquireRacingCloseRejectsFreshReader(t *testing.T) {
-	t.Parallel()
-
-	pooled := newPooledReader()
-	factory := &blockingFactory{
-		reader:  pooled,
-		entered: make(chan struct{}),
-		release: make(chan struct{}),
-	}
-
-	client := journal.NewClientWithFactory(factory, 2)
-	results := make(chan acquireResult, 1)
-
-	go func() {
-		reader, err := client.Acquire()
-		results <- acquireResult{reader: reader, err: err}
-	}()
-
-	// Wait until Acquire has passed its closed-check and is inside the factory open
-	// with the pool lock released, then close the Client underneath it.
-	<-factory.entered
-	require.NoError(t, client.Close())
-	close(factory.release)
-
-	result := <-results
-	assert.Nil(t, result.reader, "a fresh reader must not escape once Close has run")
-	require.Error(t, result.err)
-
-	var oopsErr oops.OopsError
-
-	require.ErrorAs(t, result.err, &oopsErr)
-	assert.Equal(t, "client_closed", oopsErr.Code())
-
-	// The fresh Reader the factory opened must be closed, not leaked to the caller.
-	pooled.AssertNumberOfCalls(t, "Close", 1)
 }
 
 func TestClientConcurrentAcquireNeverDoubleHandsReader(t *testing.T) {
@@ -359,7 +207,6 @@ func TestClientConcurrentAcquireNeverDoubleHandsReader(t *testing.T) {
 
 	waitGroup.Wait()
 
-	require.NoError(t, client.Close())
 	assert.False(t, tracker.doubleHanded(), "pool handed the same reader to two callers at once")
 	assert.False(t, tracker.failed(), "acquire or release returned an unexpected error")
 }

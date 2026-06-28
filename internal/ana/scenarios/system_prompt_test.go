@@ -54,15 +54,23 @@ func TestControllerSystemPromptHostSignatures(t *testing.T) {
 func TestControllerSystemPromptBudgets(t *testing.T) {
 	t.Parallel()
 
-	budgets := []string{"30 turns", "recursion depth 3", "60 sub-calls", "30min"}
+	prompt := scenarios.ControllerSystemPrompt
 
-	require.Len(t, budgets, 4, "all four budget figures must be covered")
-
-	for _, want := range budgets {
-		t.Run(want, func(t *testing.T) {
+	for _, want := range []string{"recursion depth 3", "60 sub-calls"} {
+		t.Run("advertises/"+want, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Contains(t, scenarios.ControllerSystemPrompt, want)
+			assert.Contains(t, prompt, want, "the only real caps must still be advertised")
+		})
+	}
+
+	// The wall-clock timeout, soft deadline, and turn budget were removed from the run;
+	// the model must not be told they still bound the investigation.
+	for _, gone := range []string{"30 turns", "30min", "wall time", "wall-clock"} {
+		t.Run("omits/"+gone, func(t *testing.T) {
+			t.Parallel()
+
+			assert.NotContains(t, prompt, gone, "the removed turn/wall-time budget must not be advertised")
 		})
 	}
 }

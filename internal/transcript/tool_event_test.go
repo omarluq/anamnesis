@@ -18,7 +18,6 @@ func TestFormatToolEventDisplayOmitsStructuredErrorMarker(t *testing.T) {
 		DetailsJSON:   "",
 		Result:        "",
 		Error:         "read failed",
-		IsError:       true,
 	}
 
 	assert.Equal(t, stringsJoinLines(
@@ -37,7 +36,6 @@ func TestFormatToolEventSkipsBlankOptionalSections(t *testing.T) {
 		DetailsJSON:   "",
 		Result:        "\n",
 		Error:         "",
-		IsError:       false,
 	}
 
 	assert.Equal(t, "tool: write", transcript.FormatToolEventDisplay(&event))

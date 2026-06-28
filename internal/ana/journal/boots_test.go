@@ -23,17 +23,12 @@ const (
 )
 
 // loadBoots builds a fixture-backed client, enumerates its boots and returns them,
-// registering the client's Close as test cleanup so each case keeps only its own
-// distinctive assertions. It fails the test if enumerating the boots errors.
+// so each case keeps only its own distinctive assertions. It fails the test if
+// enumerating the boots errors.
 func loadBoots(t *testing.T) []journal.BootInfo {
 	t.Helper()
 
-	client := journal.NewClientWithFactory(newFixtureFactory(t), 1)
-	t.Cleanup(func() {
-		require.NoError(t, client.Close())
-	})
-
-	boots, err := client.Boots()
+	boots, err := newFixtureClient(t).Boots()
 	require.NoError(t, err)
 
 	return boots
@@ -101,60 +96,35 @@ func TestBootsFirstSeenNotAfterLastSeen(t *testing.T) {
 	}
 }
 
-func TestBootsPropagatesAcquireFailure(t *testing.T) {
-	t.Parallel()
-
-	factory := new(mockFactory)
-	factory.On("NewReader").Return(nil, assert.AnError).Once()
-
-	client := journal.NewClientWithFactory(factory, 1)
-
-	boots, err := client.Boots()
-	assert.Nil(t, boots)
-	require.ErrorIs(t, err, assert.AnError)
-
-	factory.AssertExpectations(t)
+// bootsPropagationCases enumerates the acquire, seek and advance failures Boots
+// must surface, reusing the shared failure factories from counts_test.go so the
+// pool-failure scaffolding is defined once.
+var bootsPropagationCases = []struct {
+	arrange func() *mockFactory
+	name    string
+}{
+	{name: "acquire_failure", arrange: failingFactory},
+	{name: "seek_failure", arrange: seekFailFactory},
+	{name: "advance_failure", arrange: advanceFailFactory},
 }
 
-func TestBootsPropagatesSeekFailure(t *testing.T) {
+func TestBootsPropagatesReaderErrors(t *testing.T) {
 	t.Parallel()
 
-	reader := newPooledReader()
-	reader.On("SeekHead").Return(assert.AnError)
+	for _, testCase := range bootsPropagationCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
 
-	factory := new(mockFactory)
-	factory.On("NewReader").Return(reader, nil).Once()
+			factory := testCase.arrange()
+			client := journal.NewClientWithFactory(factory, 1)
 
-	client := journal.NewClientWithFactory(factory, 1)
+			boots, err := client.Boots()
+			assert.Nil(t, boots)
+			require.ErrorIs(t, err, assert.AnError)
 
-	boots, err := client.Boots()
-	assert.Nil(t, boots)
-	require.ErrorIs(t, err, assert.AnError)
-
-	require.NoError(t, client.Close())
-	reader.AssertExpectations(t)
-	factory.AssertExpectations(t)
-}
-
-func TestBootsPropagatesAdvanceFailure(t *testing.T) {
-	t.Parallel()
-
-	reader := newPooledReader()
-	reader.On("SeekHead").Return(nil)
-	reader.On("Next").Return(uint64(0), assert.AnError)
-
-	factory := new(mockFactory)
-	factory.On("NewReader").Return(reader, nil).Once()
-
-	client := journal.NewClientWithFactory(factory, 1)
-
-	boots, err := client.Boots()
-	assert.Nil(t, boots)
-	require.ErrorIs(t, err, assert.AnError)
-
-	require.NoError(t, client.Close())
-	reader.AssertExpectations(t)
-	factory.AssertExpectations(t)
+			factory.AssertExpectations(t)
+		})
+	}
 }
 
 func TestBootsSkipsRecordsWithoutBootID(t *testing.T) {
@@ -169,10 +139,7 @@ func TestBootsSkipsRecordsWithoutBootID(t *testing.T) {
 		journal.FieldRealtime: "1782468000000000",
 	}, nil).Once()
 
-	factory := new(mockFactory)
-	factory.On("NewReader").Return(reader, nil).Once()
-
-	client := journal.NewClientWithFactory(factory, 1)
+	client, factory := clientWithReader(t, reader, 1)
 
 	// The lone record carries no _BOOT_ID, so it must be skipped rather than
 	// enumerated as a phantom boot keyed by the empty string.
@@ -180,7 +147,6 @@ func TestBootsSkipsRecordsWithoutBootID(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, boots)
 
-	require.NoError(t, client.Close())
 	reader.AssertExpectations(t)
 	factory.AssertExpectations(t)
 }

@@ -20,7 +20,6 @@ func TestTextAreaEditing(t *testing.T) {
 
 	require.Equal(t, "h!i", area.Text)
 	require.Equal(t, 2, area.Cursor)
-	require.Equal(t, []string{"h", "!", "i"}, area.Chars)
 }
 
 func TestTextAreaClearReturnsPreviousText(t *testing.T) {
@@ -31,7 +30,6 @@ func TestTextAreaClearReturnsPreviousText(t *testing.T) {
 
 	require.Equal(t, "draft", area.Clear())
 	require.True(t, area.Empty())
-	require.Empty(t, area.Chars)
 }
 
 func TestClampCursor(t *testing.T) {
@@ -128,7 +126,6 @@ func TestRenderTextArea(t *testing.T) {
 	area := tui.NewTextArea()
 	area.SetText("first\nsecond")
 	area.Cursor = len([]rune("first\nse"))
-	area.Label = "PROMPT"
 	rendered := area.Render(12, 2, tui.TextAreaStyles{Border: tcell.StyleDefault, Body: tcell.StyleDefault})
 
 	require.Len(t, rendered.Lines, 4)
@@ -141,23 +138,12 @@ func TestRenderTextAreaWrapsBeforeRightBorder(t *testing.T) {
 
 	area := tui.NewTextArea()
 	area.SetText("abcdefghijklmnopq")
-	area.Label = "normal"
 	rendered := area.Render(20, 3, tui.TextAreaStyles{Border: tcell.StyleDefault, Body: tcell.StyleDefault})
 
 	require.Equal(t, "│ abcdefghijklmnop │", rendered.Lines[1].Text)
 	require.Equal(t, "│ q                │", rendered.Lines[2].Text)
 	require.Equal(t, 3, rendered.CursorCol)
 	require.Equal(t, 2, rendered.CursorRow)
-}
-
-func TestRenderTextAreaRightAlignsLabel(t *testing.T) {
-	t.Parallel()
-
-	area := tui.NewTextArea()
-	area.Label = "normal"
-	rendered := area.Render(20, 1, tui.TextAreaStyles{Border: tcell.StyleDefault, Body: tcell.StyleDefault})
-
-	require.Equal(t, "╭──────────normal──╮", rendered.Lines[0].Text)
 }
 
 func TestWrapPreserveWhitespaceHandlesNarrowWidth(t *testing.T) {

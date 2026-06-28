@@ -19,7 +19,7 @@ import (
 func TestTranscriptCacheServesUnchangedMessageFromCache(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	app := newTestApp()
 	app.appendUser("hello world")
 
 	first := app.transcriptLines(80)
@@ -40,7 +40,7 @@ func TestTranscriptCacheServesUnchangedMessageFromCache(t *testing.T) {
 func TestTranscriptCacheReRendersStreamedDelta(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	app := newTestApp()
 	app.appendThinkingDelta("first chunk ")
 	app.transcriptLines(80)
 
@@ -61,9 +61,9 @@ func TestTranscriptCacheReRendersStreamedDelta(t *testing.T) {
 func TestTranscriptCacheReRendersSettledQueryBlock(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	app := newTestApp()
 	app.toolsExpanded = true
-	app.appendQueryStart(1, "find boots", 0)
+	app.appendQueryStart(1, "find boots")
 	app.transcriptLines(80)
 
 	require.True(t, app.history[0].Pending, "the query block starts pending")
@@ -85,7 +85,7 @@ func TestTranscriptCacheReRendersSettledQueryBlock(t *testing.T) {
 func TestTranscriptCacheReRendersOnToolsExpandToggle(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	app := newTestApp()
 	app.appendCodeStart("boots := journal.Boots()\nfmt.Println(len(boots))")
 
 	app.toolsExpanded = false
@@ -106,7 +106,7 @@ func TestTranscriptCacheReRendersOnToolsExpandToggle(t *testing.T) {
 func TestTranscriptCacheReRendersOnWidthChange(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	app := newTestApp()
 	app.appendUser("a sufficiently long user message that must wrap onto several rows once the window narrows")
 
 	wide := app.transcriptLines(80)
@@ -126,7 +126,7 @@ func TestTranscriptCacheReRendersOnWidthChange(t *testing.T) {
 func TestTranscriptCacheKeepsUnchangedMessagesWhileOneMutates(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	app := newTestApp()
 	app.appendUser("stable message")
 	app.appendThinkingDelta("streaming ")
 	app.transcriptLines(80)

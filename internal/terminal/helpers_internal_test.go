@@ -56,6 +56,13 @@ func newFakeScreen(width, height int) *fakeScreen {
 	}
 }
 
+// newTestApp builds a default-configured App on a fresh 80x24 fake screen with no
+// trace channel and no controller — the standard fixture for unit tests that drive
+// app state directly rather than through a live run loop.
+func newTestApp() *App {
+	return newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+}
+
 // EventQ returns the screen's event channel, just like a real tcell screen.
 func (screen *fakeScreen) EventQ() chan tcell.Event {
 	return screen.events
@@ -203,8 +210,8 @@ func traceEvent(kind TraceKind, text string, runID uint64) TraceEvent {
 	}
 }
 
-// traceDepthEvent builds a TraceEvent at the given recursion depth so indentation
-// assertions bind the rendered prefix to the event's Depth.
+// traceDepthEvent builds a TraceEvent stamped with the given recursion depth, so a test
+// can assert the event carries its nesting level.
 func traceDepthEvent(kind TraceKind, text string, depth int) TraceEvent {
 	return TraceEvent{
 		Kind:    kind,
@@ -233,13 +240,21 @@ func scriptedTrace(runID uint64, events ...TraceEvent) <-chan TraceEvent {
 // composerInput feeds a printable or editing key into the composer, mirroring the
 // normalized key events the run loop routes in from the screen.
 func composerInput(app *App, key, text string) {
-	app.composerKey(tui.KeyEvent{Key: key, Text: text, Ctrl: false, Alt: false, Shift: false})
+	app.composerKey(tui.KeyEvent{Key: key, Text: text, Ctrl: false})
 }
 
 // composerInputCtrl feeds a ctrl-chorded key into the composer; the composer
 // ignores ctrl chords, so this proves they do not mutate the buffer.
 func composerInputCtrl(app *App, key string) {
-	app.composerKey(tui.KeyEvent{Key: key, Text: "", Ctrl: true, Alt: false, Shift: false})
+	app.composerKey(tui.KeyEvent{Key: key, Text: "", Ctrl: true})
+}
+
+// typeRunes feeds text into the composer one rune at a time, the way the run loop
+// routes individual printable key events in from the screen.
+func typeRunes(app *App, text string) {
+	for _, char := range text {
+		composerInput(app, string(char), string(char))
+	}
 }
 
 // toggleKey routes the ctrl+o query-block toggle through the real key dispatch — the
@@ -346,6 +361,16 @@ func sendTrace(t *testing.T, channel chan<- TraceEvent, event TraceEvent) {
 	case <-time.After(loopTimeout):
 		t.Fatal("timed out posting trace event to run loop")
 	}
+}
+
+// startLoop runs app.loop on a background context in its own goroutine and returns
+// the channel its result is delivered on, so a test can drive events through the
+// screen and then await the loop's clean exit.
+func startLoop(app *App) <-chan error {
+	done := make(chan error, 1)
+	go func() { done <- app.loop(context.Background()) }()
+
+	return done
 }
 
 // awaitLoop waits for the loop's result with a bounded timeout.

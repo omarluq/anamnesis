@@ -12,14 +12,10 @@ import (
 	"github.com/omarluq/anamnesis/internal/transcript"
 )
 
-func newChatApp() *App {
-	return newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
-}
-
 func TestTranscriptShowsWelcomeWhenEmpty(t *testing.T) {
 	t.Parallel()
 
-	app := newChatApp()
+	app := newTestApp()
 
 	assert.Contains(t, transcriptText(app, 60), "Type a message", "the empty transcript shows the welcome line")
 }
@@ -27,21 +23,19 @@ func TestTranscriptShowsWelcomeWhenEmpty(t *testing.T) {
 func TestComposerInsertsTypedRunesAndReportsEmptiness(t *testing.T) {
 	t.Parallel()
 
-	app := newChatApp()
+	app := newTestApp()
 	require.True(t, app.composer.Empty())
 
-	for _, char := range "hello" {
-		composerInput(app, string(char), string(char))
-	}
+	typeRunes(app, "hello")
 
 	assert.False(t, app.composer.Empty())
-	assert.Equal(t, "hello", app.composer.TextValue())
+	assert.Equal(t, "hello", app.composer.Text)
 }
 
 func TestComposerIgnoresControlAndEmptyKeys(t *testing.T) {
 	t.Parallel()
 
-	app := newChatApp()
+	app := newTestApp()
 
 	composerInputCtrl(app, "ctrl+a")
 	composerInput(app, "f1", "")
@@ -52,27 +46,23 @@ func TestComposerIgnoresControlAndEmptyKeys(t *testing.T) {
 func TestComposerEditingKeysMoveAndDelete(t *testing.T) {
 	t.Parallel()
 
-	app := newChatApp()
-	for _, char := range "abc" {
-		composerInput(app, string(char), string(char))
-	}
+	app := newTestApp()
+	typeRunes(app, "abc")
 
 	composerInput(app, "left", "")
 	composerInput(app, "backspace", "")
-	assert.Equal(t, "ac", app.composer.TextValue())
+	assert.Equal(t, "ac", app.composer.Text)
 
 	composerInput(app, "right", "")
 	composerInput(app, "backspace", "")
-	assert.Equal(t, "a", app.composer.TextValue())
+	assert.Equal(t, "a", app.composer.Text)
 }
 
 func TestSubmitEchoesUserMessageAndClearsComposer(t *testing.T) {
 	t.Parallel()
 
-	app := newChatApp()
-	for _, char := range "hello world" {
-		composerInput(app, string(char), string(char))
-	}
+	app := newTestApp()
+	typeRunes(app, "hello world")
 
 	composerInput(app, "enter", "")
 
@@ -84,13 +74,11 @@ func TestSubmitEchoesUserMessageAndClearsComposer(t *testing.T) {
 func TestSubmitOfWhitespaceIsNoop(t *testing.T) {
 	t.Parallel()
 
-	app := newChatApp()
+	app := newTestApp()
 
 	composerInput(app, "enter", "")
 
-	for _, char := range "   " {
-		composerInput(app, string(char), string(char))
-	}
+	typeRunes(app, "   ")
 
 	composerInput(app, "enter", "")
 
@@ -113,8 +101,7 @@ func TestComposerSubmitDrivesControllerRunThroughLoop(t *testing.T) {
 
 	app := newApp(screen, RunOptions{Trace: nil, Controller: ctrl, Title: defaultTitle})
 
-	done := make(chan error, 1)
-	go func() { done <- app.loop(context.Background()) }()
+	done := startLoop(app)
 
 	submitQuery(screen, query)
 	awaitContents(t, screen, "all clear")
@@ -157,9 +144,7 @@ func TestComposerCursorTracksCaret(t *testing.T) {
 	assert.Equal(t, app.caretColumn, startColumn, "the native cursor matches the recorded caret column")
 	assert.Equal(t, app.caretRow, startRow, "the native cursor matches the recorded caret row")
 
-	for _, char := range "hi" {
-		composerInput(app, string(char), string(char))
-	}
+	typeRunes(app, "hi")
 
 	app.draw()
 

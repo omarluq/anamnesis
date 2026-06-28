@@ -79,24 +79,25 @@ func TestParseEffortMapsKnownTiers(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name string
-		want responses.ReasoningEffort
+		name  string
+		input string
+		want  responses.ReasoningEffort
 	}{
-		{name: "none", want: responses.ReasoningEffortNone},
-		{name: "minimal", want: responses.ReasoningEffortMinimal},
-		{name: "low", want: responses.ReasoningEffortLow},
-		{name: "medium", want: responses.ReasoningEffortMedium},
-		{name: "high", want: responses.ReasoningEffortHigh},
-		{name: "xhigh", want: responses.ReasoningEffortXhigh},
-		{name: "  Medium  ", want: responses.ReasoningEffortMedium},
-		{name: "XHIGH", want: responses.ReasoningEffortXhigh},
+		{name: "tier_none", input: "none", want: responses.ReasoningEffortNone},
+		{name: "tier_minimal", input: "minimal", want: responses.ReasoningEffortMinimal},
+		{name: "tier_low", input: "low", want: responses.ReasoningEffortLow},
+		{name: "tier_medium", input: "medium", want: responses.ReasoningEffortMedium},
+		{name: "tier_high", input: "high", want: responses.ReasoningEffortHigh},
+		{name: "tier_xhigh", input: "xhigh", want: responses.ReasoningEffortXhigh},
+		{name: "surrounding_whitespace_trimmed", input: "  Medium  ", want: responses.ReasoningEffortMedium},
+		{name: "uppercase_normalized", input: "XHIGH", want: responses.ReasoningEffortXhigh},
 	}
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := ParseEffort(testCase.name)
+			got, err := ParseEffort(testCase.input)
 			require.NoError(t, err)
 			assert.Equal(t, testCase.want, got, "the tier name maps to its SDK enum, case-insensitively")
 		})

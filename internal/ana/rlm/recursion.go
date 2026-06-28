@@ -102,6 +102,11 @@ type recursiveSub struct {
 	leaf func(prompt, evidence string) (string, error)
 	// descend runs a full child controller loop at the given child context.
 	descend func(child RecursionContext, prompt, evidence string) (string, error)
+	// progress is the shared tree-wide work counter Sub bumps at each sub-call's start
+	// and end, so a parent node's idle watchdog counts a descending child loop as
+	// progress. It is nil where a unit test drives an adapter in isolation; bumpProgress
+	// tolerates that.
+	progress *atomic.Int64 `exhaustruct:"optional"`
 	// rc is this node's immutable depth in the tree.
 	rc RecursionContext
 }
@@ -121,12 +126,14 @@ func (s *recursiveSub) Sub(prompt, evidence string) (string, error) {
 	queryID := s.queryIDs.Add(1)
 	depth := s.rc.CurrentDepth + 1
 
+	s.bumpProgress()
 	s.budget.RecordDepth(depth)
 	s.tracer.QueryStart(queryID, prompt, depth)
 
 	result, path, err := s.resolve(prompt, evidence)
 
 	s.tracer.QueryEnd(queryID, result, depth)
+	s.bumpProgress()
 
 	slog.Info(
 		"rlm sub-call",
@@ -138,6 +145,16 @@ func (s *recursiveSub) Sub(prompt, evidence string) (string, error) {
 	)
 
 	return result, err
+}
+
+// bumpProgress advances the shared tree-wide work counter so a parent node's idle
+// watchdog counts this sub-call as progress rather than mistaking a busy descent for a
+// wedge. It tolerates a nil counter so a unit test can drive an adapter in isolation
+// without wiring one.
+func (s *recursiveSub) bumpProgress() {
+	if s.progress != nil {
+		s.progress.Add(1)
+	}
 }
 
 // resolve charges the shared sub-call budget and routes the call: an exhausted
@@ -161,9 +178,7 @@ func (s *recursiveSub) resolve(prompt, evidence string) (answer, path string, er
 		return answer, subCallPathLeaf, err
 	}
 
-	answer, err = s.recurse(prompt, evidence)
-
-	return answer, subCallPathRecurse, err
+	return s.recurse(prompt, evidence)
 }
 
 // recurse claims one shared recursion frame, runs the child controller loop one
@@ -171,26 +186,29 @@ func (s *recursiveSub) resolve(prompt, evidence string) (answer, path string, er
 // been enforced by CanRecurse on this node's immutable RecursionContext, which is
 // correct under concurrent fan-out; EnterDepth is the tree-wide backstop on
 // concurrently-active recursion frames, so a saturated frame budget or a failed
-// child loop degrades to text the parent reasons over rather than a Go error.
-func (s *recursiveSub) recurse(prompt, evidence string) (string, error) {
-	if err := s.budget.EnterDepth(); err != nil {
+// child loop degrades to text the parent reasons over rather than a Go error. It
+// reports the routing path it actually took alongside the answer: a saturated frame
+// budget never recursed, so it logs as skipped, while a descend that ran — whether the
+// child concluded or failed — logs as a recursion.
+func (s *recursiveSub) recurse(prompt, evidence string) (answer, path string, err error) {
+	if enterErr := s.budget.EnterDepth(); enterErr != nil {
 		slog.Warn(
 			"rlm budget breach",
 			slog.String("budget", "depth"),
 			slog.Int("depth", s.rc.CurrentDepth+1),
 		)
 
-		return degradedText(subInvestigationSkipped, err), nil
+		return degradedText(subInvestigationSkipped, enterErr), subCallPathSkipped, nil
 	}
 
 	defer s.budget.ExitDepth()
 
-	answer, err := s.descend(s.rc.Child(), prompt, evidence)
+	answer, err = s.descend(s.rc.Child(), prompt, evidence)
 	if err != nil {
-		return degradedText(subInvestigationFailed, err), nil
+		return degradedText(subInvestigationFailed, err), subCallPathRecurse, nil
 	}
 
-	return answer, nil
+	return answer, subCallPathRecurse, nil
 }
 
 // degradedText renders a graceful sub-call degradation as the labeled text the
@@ -218,19 +236,32 @@ type recursor struct {
 	// queryIDs mints a tree-wide unique id per sub-call, shared into every node's
 	// adapter so ids never collide across levels or across concurrent fan-out.
 	queryIDs *atomic.Uint64
+	// progress is the shared tree-wide work counter SetProgress installs on every
+	// interpreter and recursiveSub.Sub bumps, so each node's idle watchdog sees the
+	// whole tree's progress rather than only its own stdout.
+	progress *atomic.Int64
 }
 
 // newRecursor binds the collaborators every node of one investigation tree reuses
 // into the factory that builds its interpreters, adapters, and child loops. A nil
 // tracer defaults to the no-op, so the recursion core runs with no terminal
 // attached without the caller wiring a tracer. The fresh query-id counter is shared
-// across every adapter the factory builds, so sub-call ids are unique tree-wide.
-func newRecursor(deps *Deps, budget *Budget, emitter *Emitter, tracer QueryTracer) *recursor {
+// across every adapter the factory builds, so sub-call ids are unique tree-wide; the
+// caller's progress counter is shared the same way so every node's idle watchdog reads
+// one tree-wide work signal.
+func newRecursor(deps *Deps, budget *Budget, emitter *Emitter, tracer QueryTracer, progress *atomic.Int64) *recursor {
 	if tracer == nil {
 		tracer = noopQueryTracer{}
 	}
 
-	return &recursor{deps: deps, budget: budget, emitter: emitter, tracer: tracer, queryIDs: new(atomic.Uint64)}
+	return &recursor{
+		deps:     deps,
+		budget:   budget,
+		emitter:  emitter,
+		tracer:   tracer,
+		queryIDs: new(atomic.Uint64),
+		progress: progress,
+	}
 }
 
 // interpreter assembles the mvm REPL session a controller at rc drives: the
@@ -267,6 +298,10 @@ func (r *recursor) interpreter(
 			Wrapf(err, "assemble repl session")
 	}
 
+	// Share the run's one progress counter so this node's idle watchdog observes the
+	// whole tree's work, not just what this interpreter prints to its own stdout.
+	interpreter.SetProgress(r.progress)
+
 	return interpreter, nil
 }
 
@@ -279,6 +314,7 @@ func (r *recursor) subFor(ctx context.Context, node RecursionContext) *recursive
 		budget:   r.budget,
 		queryIDs: r.queryIDs,
 		tracer:   r.tracer,
+		progress: r.progress,
 		rc:       node,
 		leaf: func(prompt, evidence string) (string, error) {
 			return r.deps.Sub.Answer(ctx, prompt, evidence)
@@ -290,8 +326,8 @@ func (r *recursor) subFor(ctx context.Context, node RecursionContext) *recursive
 }
 
 // runChild runs a full child controller loop for one recursive sub-call: a fresh
-// interpreter, a fresh citation store, a fresh turn budget, and a sub-call seam one
-// level deeper that shares the tree-wide budget. It returns the child's FINAL
+// interpreter, a fresh citation store, a fresh per-eval budget, and a sub-call seam
+// one level deeper that shares the tree-wide budget. It returns the child's FINAL
 // answer, or an error the calling adapter converts to graceful text.
 func (r *recursor) runChild(
 	ctx context.Context,

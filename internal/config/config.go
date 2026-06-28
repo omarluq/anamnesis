@@ -15,6 +15,20 @@ const (
 	envProduction  = "production"
 )
 
+// Reasoning-effort tiers, ordered cheapest-to-costliest. They are the single
+// source of truth for the case-insensitive values a model role may be configured
+// with, shared by validReasoningEfforts, the loader defaults, and the tests that
+// assert them. They mirror the OpenAI Responses API effort enum that
+// openai.ParseEffort maps these names onto.
+const (
+	effortNone    = "none"
+	effortMinimal = "minimal"
+	effortLow     = "low"
+	effortMedium  = "medium"
+	effortHigh    = "high"
+	effortXHigh   = "xhigh"
+)
+
 // Allowed values per validated field, kept as the single source of truth shared
 // by Validate's membership checks and the error messages it produces.
 var (
@@ -22,10 +36,9 @@ var (
 	validLogLevels  = []string{"debug", "info", "warn", "error"}
 	validLogFormats = []string{"pretty", "json"}
 	// validReasoningEfforts is the case-insensitive set of reasoning-effort tiers a
-	// model role may be configured with, ordered cheapest-to-costliest. It mirrors
-	// the OpenAI Responses API effort enum that openai.ParseEffort maps these names
-	// onto; Validate compares the lowercased configured value against this set.
-	validReasoningEfforts = []string{"none", "minimal", "low", "medium", "high", "xhigh"}
+	// model role may be configured with, ordered cheapest-to-costliest. Validate
+	// compares the lowercased configured value against this set.
+	validReasoningEfforts = []string{effortNone, effortMinimal, effortLow, effortMedium, effortHigh, effortXHigh}
 )
 
 // Config is the fully resolved application configuration.

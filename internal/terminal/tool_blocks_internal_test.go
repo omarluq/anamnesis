@@ -39,7 +39,7 @@ func TestParseQueryContentKeepsMarkerLikeOutputLines(t *testing.T) {
 func TestRenderPendingBlockRespectsToolsExpanded(t *testing.T) {
 	t.Parallel()
 
-	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	app := newTestApp()
 
 	// The first source line surfaces in the header summary; the second only ever shows
 	// inside the expanded args body, so it is the discriminator between the two modes.

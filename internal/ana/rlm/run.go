@@ -3,6 +3,7 @@ package rlm
 import (
 	"context"
 	"log/slog"
+	"sync/atomic"
 
 	"github.com/samber/oops"
 
@@ -40,7 +41,7 @@ type Deps struct {
 	// levels below the root before the leaf falls back to a flat call.
 	MaxDepth int
 	// MaxSubCalls bounds the total agent.Query and agent.QueryBatched sub-calls the
-	// whole recursion tree may spend, shared across every level (SPEC §6: 30).
+	// whole recursion tree may spend, shared across every level (SPEC §6: 60).
 	MaxSubCalls int
 }
 
@@ -87,19 +88,28 @@ func (deps *Deps) validate() error {
 // builds the citation store, trace emitter, and shared tree-wide §6 budget, then
 // wires the root mvm REPL session over the host surfaces with a visibility-
 // recording journal and the recursive sub-call adapter, frames the controller with
-// the SPEC §14 system prompt, and drives the audited turn loop under the §6 hard
-// budget — the budget's wall-clock deadline (see Budget.WallTimeout) layered onto
-// ctx alongside the 30-turn cap. agent.Query is genuinely recursive: a sub-call
-// above the leaf level spawns a full child controller loop one level deeper, while
-// the leaf falls
-// back to a flat base-case call, all sharing one budget. It returns the
-// judge-approved final answer, which it also publishes as the terminal trace
-// event, or an oops error tagged with the rlm domain when the session cannot be
-// assembled or the loop fails.
+// the SPEC §14 system prompt, and drives the audited turn loop. The run carries no
+// wall-clock or turn budget: it runs until the controller signals agent.FINAL, the
+// caller cancels ctx, or a turn's eval idles past its per-eval progress watchdog.
+// Investigate derives a cancelable child of ctx and cancels it on return, so a
+// force-finished or completed run tears down any still-running child controller loops
+// and sub-LLM calls rather than letting an abandoned subtree keep making paid model
+// calls. agent.Query is genuinely recursive: a sub-call above the leaf level spawns a
+// full child controller loop one level deeper, while the leaf falls back to a flat
+// base-case call, all sharing one budget. It returns the judge-approved final answer,
+// which it also publishes as the terminal trace event, or an oops error tagged with
+// the rlm domain when the session cannot be assembled or the loop fails.
 func Investigate(ctx context.Context, question string, deps *Deps) (string, error) {
 	if err := deps.validate(); err != nil {
 		return "", err
 	}
+
+	// Derive a cancelable child so returning — on a clean finish or a force-finish —
+	// tears down any still-running child controller loops and sub-LLM calls. Without
+	// this an abandoned eval's subtree would keep honoring the original ctx and keep
+	// making paid model calls after the run has already settled.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	budget := newTreeBudget(deps)
 
@@ -107,14 +117,18 @@ func Investigate(ctx context.Context, question string, deps *Deps) (string, erro
 		ctx,
 		"rlm investigation start",
 		slog.Uint64("run_id", deps.RunID),
-		slog.String("question", question),
+		slog.Int("question_len", len(question)),
 		slog.Int("max_depth", deps.MaxDepth),
 		slog.Int("max_sub_calls", deps.MaxSubCalls),
 	)
 
 	store := citations.NewStore()
 	emitter := NewEmitter(ctx, deps.Events, deps.RunID)
-	factory := newRecursor(deps, budget, emitter, emitter)
+	// progress is the tree-wide work counter every interpreter's idle watchdog reads:
+	// one counter shared across the root and every child loop, so a slow child's work
+	// keeps the parent's watchdog from mistaking a busy fan-out for a wedge.
+	progress := new(atomic.Int64)
+	factory := newRecursor(deps, budget, emitter, emitter, progress)
 	root := RecursionContext{CurrentDepth: 0, MaxDepth: deps.MaxDepth}
 
 	interpreter, err := factory.interpreter(ctx, root, store)
@@ -165,9 +179,8 @@ func Investigate(ctx context.Context, question string, deps *Deps) (string, erro
 // gauge would conflate breadth with depth. The budget's depth gauge is instead a
 // backstop on concurrently-active recursion frames; since each live frame holds a
 // reserved sub-call, it is sized to the sub-call budget so it never refuses a
-// frame the sub-call budget would still admit. The turn budget and wall-clock
-// timeout keep their NewBudget defaults; each child controller loop gets its own
-// fresh turn budget.
+// frame the sub-call budget would still admit. The per-eval idle timeout keeps its
+// NewBudget default; each child controller loop builds its own fresh Budget.
 func newTreeBudget(deps *Deps) *Budget {
 	budget := NewBudget()
 	budget.MaxSubCalls = deps.MaxSubCalls

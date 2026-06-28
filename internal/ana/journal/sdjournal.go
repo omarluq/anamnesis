@@ -65,16 +65,6 @@ func (reader *sdjournalReader) AddMatch(match string) error {
 	return nil
 }
 
-// AddDisjunction inserts an OR boundary before the next match group, wrapping any
-// libsystemd rejection with journal context.
-func (reader *sdjournalReader) AddDisjunction() error {
-	if err := reader.handle.AddDisjunction(); err != nil {
-		return oops.In("journal").Code("add_disjunction").Wrapf(err, "add disjunction")
-	}
-
-	return nil
-}
-
 // SeekHead positions the cursor before the first matching record, wrapping any
 // libsystemd rejection with journal context.
 func (reader *sdjournalReader) SeekHead() error {
