@@ -4,17 +4,18 @@ package terminal
 type TraceKind string
 
 const (
-	// TraceKindTurn marks the start of a reasoning turn in the RLM loop.
-	TraceKindTurn TraceKind = "turn"
-	// TraceKindCode marks the generated Go source a turn evaluated in the REPL.
-	TraceKindCode TraceKind = "code"
-	// TraceKindStdout marks captured stdout from a turn's evaluated code.
-	TraceKindStdout TraceKind = "stdout"
-	// TraceKindSubCall marks a nested sub-call fanned out from a turn.
-	TraceKindSubCall TraceKind = "sub-call"
+	// TraceKindThinking marks a controller reasoning turn's thinking, rendered as
+	// the dim/italic thinking block in the chat transcript.
+	TraceKindThinking TraceKind = "thinking"
+	// TraceKindQueryStart marks the start of an agent.Query sub-call, opening a
+	// depth-indented query block whose args carry the sub-call prompt.
+	TraceKindQueryStart TraceKind = "query-start"
+	// TraceKindQueryEnd marks an agent.Query sub-call returning, completing the
+	// query block opened at the same depth with the sub-call's result.
+	TraceKindQueryEnd TraceKind = "query-end"
 	// TraceKindFinal marks the final answer produced by the loop.
 	TraceKindFinal TraceKind = "final"
-	// TraceKindUsage carries token and cost accounting for the cost pane.
+	// TraceKindUsage carries token and cost accounting for the footer totals.
 	TraceKindUsage TraceKind = "usage"
 )
 

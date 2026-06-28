@@ -35,7 +35,7 @@ func primeStaleAmbientTrace(t *testing.T, screen *fakeScreen, ambient chan<- Tra
 
 	sendTrace(t, ambient, traceEvent(TraceKindUsage, "stale usage meter", 9_999, 9_999, 9_000_000, staleRunID))
 	sendTrace(t, ambient, traceEvent(TraceKindFinal, staleAnswer, 0, 0, 0, staleRunID))
-	sendTrace(t, ambient, traceEvent(TraceKindStdout, ambientMarker, 0, 0, 0, 0))
+	sendTrace(t, ambient, traceEvent(TraceKindQueryEnd, ambientMarker, 0, 0, 0, 0))
 
 	awaitContents(t, screen, ambientMarker)
 
@@ -109,7 +109,7 @@ func TestAppIntegrationReplayDrivesInvestigationAndDropsStaleRunID(t *testing.T)
 
 	// Phase 2: the user submits a query and the replay controller drives the full
 	// scripted investigation to its FINAL answer. Awaiting the [final] trace line
-	// proves the turn/code/stdout/sub-call/usage/final sequence drained in order.
+	// proves the thinking/query-start/query-end/usage/final sequence drained in order.
 	submitQuery(screen, integrationQuery)
 	awaitContents(t, screen, "[final]")
 

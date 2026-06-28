@@ -3,8 +3,8 @@ package terminal
 import "context"
 
 // Investigator runs one investigation of query end to end, publishing its trace
-// events — reasoning turns, generated code, captured stdout, sub-calls, usage
-// meters and the FINAL answer — onto events, each stamped with runID. It returns
+// events — thinking turns, agent.Query starts and ends, usage meters and the FINAL
+// answer — onto events, each stamped with runID. It returns
 // the final answer and a nil error on success, or a non-nil error when the run
 // could not be assembled or driven to completion. The live RLM adapter binds
 // rlm.Investigate to this shape and the di layer supplies the host collaborators

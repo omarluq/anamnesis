@@ -89,15 +89,13 @@ func traceColor(theme Theme, kind TraceKind) tcell.Color {
 	switch kind {
 	case TraceKindFinal:
 		return theme.Success
-	case TraceKindSubCall:
+	case TraceKindQueryStart:
 		return theme.Accent
+	case TraceKindQueryEnd:
+		return theme.Muted
 	case TraceKindUsage:
 		return theme.Warning
-	case TraceKindCode:
-		return theme.Dim
-	case TraceKindStdout:
-		return theme.Muted
-	case TraceKindTurn:
+	case TraceKindThinking:
 		return theme.Text
 	default:
 		return theme.Text

@@ -281,9 +281,9 @@ func (app *App) cancelRun() {
 }
 
 // applyTrace routes a trace event to the pane that owns its kind and tracks the
-// working state that drives the header spinner: turns and sub-calls mark the
-// loop busy, a final answer clears it and renders the answer markdown into the
-// chat pane, code and stdout append mid-turn without changing it, and usage
+// working state that drives the header spinner: thinking turns and query starts
+// mark the loop busy, a final answer clears it and renders the answer markdown
+// into the chat pane, a query end appends mid-turn without changing it, and usage
 // events leave it unchanged.
 func (app *App) applyTrace(event TraceEvent) {
 	switch event.Kind {
@@ -291,11 +291,11 @@ func (app *App) applyTrace(event TraceEvent) {
 		app.cost.applyUsage(event.TokensIn, event.TokensOut, event.CostMicros)
 
 		return
-	case TraceKindTurn, TraceKindSubCall:
+	case TraceKindThinking, TraceKindQueryStart:
 		app.working = true
-	case TraceKindCode, TraceKindStdout:
-		// Code and stdout are emitted mid-turn; the turn already marked the loop
-		// working, so they only append to the trace pane.
+	case TraceKindQueryEnd:
+		// A query end arrives mid-turn; the turn already marked the loop working,
+		// so it only appends to the trace pane.
 	case TraceKindFinal:
 		app.working = false
 		app.chat.appendAnswer(event.Text)

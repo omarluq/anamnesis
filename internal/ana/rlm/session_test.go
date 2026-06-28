@@ -106,8 +106,10 @@ func newSessionFixture() *sessionFixture {
 	judge := new(mockJudger)
 	budget := rlm.NewBudget()
 	store := citations.NewStore()
-	events := make(chan terminal.TraceEvent, 1)
-	emitter := rlm.NewEmitter(events, fixtureRunID)
+	// Two slots so a single agent.Query, which emits a query-start and a query-end,
+	// never blocks the synchronous caller before the test drains the channel.
+	events := make(chan terminal.TraceEvent, 2)
+	emitter := rlm.NewEmitter(context.Background(), events, fixtureRunID)
 
 	return &sessionFixture{
 		controller: controller,
@@ -148,10 +150,10 @@ func TestSessionWiresBudgetStoreEmitter(t *testing.T) {
 
 	require.NoError(t, session.Budget.ReserveTurn())
 
-	session.Emitter.Turn("planning")
+	session.Emitter.Thinking("planning")
 
 	event := <-fixture.events
-	assert.Equal(t, terminal.TraceKindTurn, event.Kind)
+	assert.Equal(t, terminal.TraceKindThinking, event.Kind)
 	assert.Equal(t, "planning", event.Text)
 	assert.Equal(t, fixtureRunID, event.RunID)
 }

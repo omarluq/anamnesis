@@ -20,14 +20,14 @@ func TestTraceTextFormatsEvents(t *testing.T) {
 		event TraceEvent
 	}{
 		{
-			name:  "turn without tokens",
-			want:  "[turn] thinking",
-			event: traceEvent(TraceKindTurn, "thinking", 0, 0, 0, 0),
+			name:  "thinking without tokens",
+			want:  "[thinking] thinking",
+			event: traceEvent(TraceKindThinking, "thinking", 0, 0, 0, 0),
 		},
 		{
-			name:  "sub-call without tokens",
-			want:  "[sub-call] tool",
-			event: traceEvent(TraceKindSubCall, "tool", 0, 0, 0, 0),
+			name:  "query-start without tokens",
+			want:  "[query-start] tool",
+			event: traceEvent(TraceKindQueryStart, "tool", 0, 0, 0, 0),
 		},
 		{
 			name:  "final sums input and output tokens",
@@ -40,14 +40,9 @@ func TestTraceTextFormatsEvents(t *testing.T) {
 			event: traceEvent(TraceKindFinal, "answer", 1200, 34, 0, 0),
 		},
 		{
-			name:  "code turn renders the generated source label",
-			want:  "[code] journal.Boots()",
-			event: traceEvent(TraceKindCode, "journal.Boots()", 0, 0, 0, 0),
-		},
-		{
-			name:  "stdout renders captured output",
-			want:  "[stdout] 3 boots found",
-			event: traceEvent(TraceKindStdout, "3 boots found", 0, 0, 0, 0),
+			name:  "query-end without tokens",
+			want:  "[query-end] the i915 driver oopsed",
+			event: traceEvent(TraceKindQueryEnd, "the i915 driver oopsed", 0, 0, 0, 0),
 		},
 	}
 
@@ -68,16 +63,16 @@ func TestTraceTextIndentsNestedSubCallLines(t *testing.T) {
 		want  string
 		depth int
 	}{
-		{name: "top level is flush left", want: "[sub-call] summarize", depth: 0},
-		{name: "depth one indents two spaces", want: "  [sub-call] summarize", depth: 1},
-		{name: "depth three indents six spaces", want: "      [sub-call] summarize", depth: 3},
+		{name: "top level is flush left", want: "[query-start] summarize", depth: 0},
+		{name: "depth one indents two spaces", want: "  [query-start] summarize", depth: 1},
+		{name: "depth three indents six spaces", want: "      [query-start] summarize", depth: 3},
 	}
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
-			event := traceDepthEvent(TraceKindSubCall, "summarize", testCase.depth)
+			event := traceDepthEvent(TraceKindQueryStart, "summarize", testCase.depth)
 			assert.Equal(t, testCase.want, traceText(event))
 		})
 	}
@@ -94,11 +89,10 @@ func TestTraceStyleMapsKindToPaletteColor(t *testing.T) {
 		want tcell.Color
 	}{
 		{name: "final", kind: TraceKindFinal, want: theme.Success},
-		{name: "sub-call", kind: TraceKindSubCall, want: theme.Accent},
+		{name: "query-start", kind: TraceKindQueryStart, want: theme.Accent},
+		{name: "query-end", kind: TraceKindQueryEnd, want: theme.Muted},
 		{name: "usage", kind: TraceKindUsage, want: theme.Warning},
-		{name: "code", kind: TraceKindCode, want: theme.Dim},
-		{name: "stdout", kind: TraceKindStdout, want: theme.Muted},
-		{name: "turn", kind: TraceKindTurn, want: theme.Text},
+		{name: "thinking", kind: TraceKindThinking, want: theme.Text},
 		{name: "unknown", kind: TraceKind("mystery"), want: theme.Text},
 	}
 
@@ -135,12 +129,12 @@ func TestTracePaneAppendEventAppendsStyledLine(t *testing.T) {
 		Title:      defaultTitle,
 	})
 
-	app.applyTrace(traceEvent(TraceKindTurn, "first", 0, 0, 0, 0))
+	app.applyTrace(traceEvent(TraceKindThinking, "first", 0, 0, 0, 0))
 	app.applyTrace(traceEvent(TraceKindFinal, "done", 3, 4, 0, 0))
 
 	lines := traceLines(app)
 	require.Len(t, lines, 2)
-	assert.Equal(t, "[turn] first", lines[0])
+	assert.Equal(t, "[thinking] first", lines[0])
 	assert.Equal(t, "[final] done (7 tok)", lines[1])
 
 	// Final events are colored with the success token; the line carries that
@@ -166,7 +160,7 @@ func TestStartRunResetsTracePaneButRetainsSessionCost(t *testing.T) {
 	app.startRun(context.Background(), "first")
 	require.Equal(t, uint64(1), app.runID)
 
-	app.applyTrace(traceEvent(TraceKindTurn, "looking", 0, 0, 0, 1))
+	app.applyTrace(traceEvent(TraceKindThinking, "looking", 0, 0, 0, 1))
 	app.applyTrace(traceEvent(TraceKindUsage, "spend", 40, 60, 1_500_000, 1))
 	app.applyTrace(traceEvent(TraceKindFinal, "done", 0, 0, 0, 1))
 
@@ -190,9 +184,9 @@ func TestStartRunResetsTracePaneButRetainsSessionCost(t *testing.T) {
 	assert.Empty(t, traceLines(app), "a stale run #1 event does not append to run #2's trace pane")
 
 	// A fresh run #2 event still lands normally through the same gate.
-	app.handleTrace(traceEvent(TraceKindTurn, "again", 0, 0, 0, 2), true)
+	app.handleTrace(traceEvent(TraceKindThinking, "again", 0, 0, 0, 2), true)
 	require.Len(t, traceLines(app), 1)
-	assert.Equal(t, "[turn] again", traceLines(app)[0])
+	assert.Equal(t, "[thinking] again", traceLines(app)[0])
 
 	ctrl.AssertExpectations(t)
 }
@@ -208,8 +202,8 @@ func TestTracePaneDrawShowsAppendedEventText(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- app.loop(context.Background()) }()
 
-	sendTrace(t, traceCh, traceEvent(TraceKindSubCall, "embedding", 0, 0, 0, 0))
-	// A sub-call marks the loop working, so its draw is throttled to the frame
+	sendTrace(t, traceCh, traceEvent(TraceKindQueryStart, "embedding", 0, 0, 0, 0))
+	// A query start marks the loop working, so its draw is throttled to the frame
 	// ticker; wait for that frame before quitting so the assertion is not racy.
 	awaitRender(t, screen, 2)
 	screen.inject(tcell.NewEventKey(tcell.KeyCtrlC, "", tcell.ModNone))

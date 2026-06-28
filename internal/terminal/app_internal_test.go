@@ -39,8 +39,8 @@ func TestHeaderTitleAppendsSpinnerOnlyWhileWorking(t *testing.T) {
 	assert.Equal(t, defaultTitle, app.headerTitle())
 	assert.Empty(t, app.spinnerGlyph())
 
-	// A turn event marks the loop working, so the header gains the spinner glyph.
-	app.applyTrace(traceEvent(TraceKindTurn, "thinking", 0, 0, 0, 0))
+	// A thinking event marks the loop working, so the header gains the spinner glyph.
+	app.applyTrace(traceEvent(TraceKindThinking, "thinking", 0, 0, 0, 0))
 	app.spinnerFrame = 0
 	assert.Equal(t, defaultTitle+" "+string(spinnerFrames[0]), app.headerTitle())
 	assert.NotEmpty(t, app.spinnerGlyph())
@@ -56,7 +56,7 @@ func TestStartRunBeginsControllerRunAndIgnoresSubmitWhileWorking(t *testing.T) {
 
 	ctrl := new(mockController)
 	ctrl.On("Start", mock.Anything, "first question", uint64(1)).
-		Return(scriptedTrace(1, traceEvent(TraceKindTurn, "looking", 0, 0, 0, 0))).
+		Return(scriptedTrace(1, traceEvent(TraceKindThinking, "looking", 0, 0, 0, 0))).
 		Once()
 
 	app := newApp(newFakeScreen(80, 24), RunOptions{
@@ -324,11 +324,11 @@ func TestApplyTraceRoutesUsageToCostAndRestToTrace(t *testing.T) {
 		Title:      defaultTitle,
 	})
 
-	app.applyTrace(traceEvent(TraceKindTurn, "thinking", 0, 0, 0, 0))
+	app.applyTrace(traceEvent(TraceKindThinking, "thinking", 0, 0, 0, 0))
 	app.applyTrace(traceEvent(TraceKindUsage, "meter", 2, 5, 250_000, 0))
 
 	require.Len(t, traceLines(app), 1, "non-usage events append to the trace pane")
-	assert.Equal(t, "[turn] thinking", traceLines(app)[0])
+	assert.Equal(t, "[thinking] thinking", traceLines(app)[0])
 
 	assert.Equal(t, 2, app.cost.tokensIn, "usage events tally input tokens into the cost pane")
 	assert.Equal(t, 5, app.cost.tokensOut, "usage events tally output tokens into the cost pane")
@@ -344,8 +344,8 @@ func TestApplyTraceFinalRendersAnswerAndClearsSpinner(t *testing.T) {
 		Title:      defaultTitle,
 	})
 
-	// A turn marks the loop working, so the header carries the spinner glyph.
-	app.applyTrace(traceEvent(TraceKindTurn, "investigating", 0, 0, 0, 0))
+	// A thinking event marks the loop working, so the header carries the spinner glyph.
+	app.applyTrace(traceEvent(TraceKindThinking, "investigating", 0, 0, 0, 0))
 	app.spinnerFrame = 0
 	require.True(t, app.working)
 	require.Equal(t, defaultTitle+" "+string(spinnerFrames[0]), app.headerTitle())

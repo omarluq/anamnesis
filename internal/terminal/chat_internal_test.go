@@ -126,7 +126,7 @@ func TestComposerSubmitDrivesControllerRunThroughLoop(t *testing.T) {
 	ctrl := new(mockController)
 	ctrl.On("Start", mock.Anything, query, uint64(1)).
 		Return(scriptedTrace(1,
-			traceEvent(TraceKindTurn, "investigating", 0, 0, 0, 0),
+			traceEvent(TraceKindThinking, "investigating", 0, 0, 0, 0),
 			traceEvent(TraceKindFinal, "all clear", 6, 9, 1_000_000, 0),
 		)).
 		Once()
@@ -151,7 +151,7 @@ func TestComposerSubmitDrivesControllerRunThroughLoop(t *testing.T) {
 	ctrl.AssertCalled(t, "Start", mock.Anything, query, uint64(1))
 	assert.Equal(t, uint64(1), app.runID, "submitting starts run #1")
 	assert.True(t, app.chat.composerEmpty(), "the composer clears once the query is submitted")
-	assert.Contains(t, traceLines(app), "[turn] investigating",
+	assert.Contains(t, traceLines(app), "[thinking] investigating",
 		"controller trace events reach the trace pane over the swapped channel")
 	assert.Contains(t, app.chat.view.Text, query, "the submitted question echoes into the answer view")
 }

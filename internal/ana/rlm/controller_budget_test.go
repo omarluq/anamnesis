@@ -115,7 +115,7 @@ func TestControllerRunRecoversOverBudgetQueryPanic(t *testing.T) {
 	assert.Contains(t, recorded.Err, panicMsg)
 
 	event := <-fixture.events
-	assert.Equal(t, terminal.TraceKindTurn, event.Kind)
+	assert.Equal(t, terminal.TraceKindThinking, event.Kind)
 	assert.Equal(t, codeTurn.Thinking, event.Text)
 
 	fixture.controller.AssertExpectations(t)
@@ -126,13 +126,13 @@ func TestControllerRunRecoversOverBudgetQueryPanic(t *testing.T) {
 // multi-turn force-finish run can emit a turn event per recorded turn without the
 // emitter blocking on a full buffer, and returns the wide channel to drain.
 func widenTrace(fixture *sessionFixture) chan terminal.TraceEvent {
-	// One buffer slot per recorded turn (the loop emits a single Turn event per
-	// turn) plus one slot of headroom, so Emitter.Turn never blocks before
+	// One buffer slot per recorded turn (the loop emits a single thinking event per
+	// turn) plus one slot of headroom, so Emitter.Thinking never blocks before
 	// drainTrace runs, and the buffer scales with the fixture's MaxTurns budget.
 	buffer := fixture.session.Budget.MaxTurns + 1
 
 	events := make(chan terminal.TraceEvent, buffer)
-	fixture.session.Emitter = rlm.NewEmitter(events, fixtureRunID)
+	fixture.session.Emitter = rlm.NewEmitter(context.Background(), events, fixtureRunID)
 
 	return events
 }
@@ -169,14 +169,14 @@ func drainTrace(events <-chan terminal.TraceEvent, count int) []terminal.TraceEv
 	return drained
 }
 
-// assertTurnEvents asserts every drained event is a turn event carrying the
+// assertTurnEvents asserts every drained event is a thinking event carrying the
 // controller's reasoning and this run's ID, proving the loop emitted one event per
 // recorded turn before it force-finished.
 func assertTurnEvents(t *testing.T, events []terminal.TraceEvent, thinking string) {
 	t.Helper()
 
 	for _, event := range events {
-		assert.Equal(t, terminal.TraceKindTurn, event.Kind)
+		assert.Equal(t, terminal.TraceKindThinking, event.Kind)
 		assert.Equal(t, thinking, event.Text)
 		assert.Equal(t, fixtureRunID, event.RunID)
 	}

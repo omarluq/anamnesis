@@ -47,10 +47,17 @@ func TestAgentQueryReturnsSubAnswerReservesBudgetAndEmits(t *testing.T) {
 	assert.Equal(t, "memory pressure", got)
 	fixture.sub.AssertExpectations(t)
 
-	event := <-fixture.events
-	assert.Equal(t, terminal.TraceKindSubCall, event.Kind)
-	assert.Equal(t, "why oom?", event.Text)
-	assert.Equal(t, fixtureRunID, event.RunID)
+	start := <-fixture.events
+	assert.Equal(t, terminal.TraceKindQueryStart, start.Kind)
+	assert.Equal(t, "why oom?", start.Text)
+	assert.Equal(t, 1, start.Depth, "the query start carries the fan-out depth")
+	assert.Equal(t, fixtureRunID, start.RunID)
+
+	end := <-fixture.events
+	assert.Equal(t, terminal.TraceKindQueryEnd, end.Kind)
+	assert.Equal(t, "memory pressure", end.Text)
+	assert.Equal(t, 1, end.Depth, "the query end carries the fan-out depth")
+	assert.Equal(t, fixtureRunID, end.RunID)
 
 	// Query reserved exactly one sub-call: MaxSubCalls-1 reservations remain.
 	remaining := 0
