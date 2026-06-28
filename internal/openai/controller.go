@@ -3,6 +3,8 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"strings"
 
 	openaisdk "github.com/openai/openai-go/v3"
@@ -103,17 +105,38 @@ func structuredFormat[T any](name, code string) (responses.ResponseFormatTextCon
 // one message item, so the concatenation is two schema-conformant objects
 // ("{...}{...}") that json.Unmarshal rejects as trailing data ("invalid
 // character '{' after top-level value"). Under strict structured output every
-// emitted object is the whole answer, so the first one is authoritative and any
-// duplicate that follows is ignored. A truncated or non-JSON reply still fails
-// here and surfaces under code.
+// emitted object is the whole answer, so the first one is authoritative; the
+// remainder of the stream is then drained and must be well-formed JSON, so a
+// duplicate object is ignored while trailing junk like "{...}xyz" — which Decode
+// would otherwise leave unread — still fails here, as does a truncated or
+// non-JSON reply. Every such failure surfaces under code.
 func decodeStructured[T any](raw, code string) (T, error) {
 	var out T
 
-	if err := json.NewDecoder(strings.NewReader(raw)).Decode(&out); err != nil {
+	dec := json.NewDecoder(strings.NewReader(raw))
+	if err := dec.Decode(&out); err != nil {
 		return out, oops.
 			In("openai").
 			Code(code).
 			Wrapf(err, "decode structured reply")
+	}
+
+	// Decode stops after the first value and leaves any trailing bytes unread, so
+	// drain the rest: each remaining value must parse as JSON (the duplicate object
+	// gpt-5.5 emits when the answer spans two message items), and the first
+	// non-JSON byte surfaces under code rather than reaching the caller.
+	for {
+		var discard json.RawMessage
+		if err := dec.Decode(&discard); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+
+			return out, oops.
+				In("openai").
+				Code(code).
+				Wrapf(err, "decode structured reply")
+		}
 	}
 
 	return out, nil
