@@ -373,15 +373,15 @@ func newControllerTurn(
 		Code:   response.Code,
 		Stdout: capForHistory(result.Stdout),
 		Retval: capForHistory(renderRetval(result.Retval)),
-		Err:    renderErr(evalErr),
+		Err:    capForHistory(renderErr(evalErr)),
 		Index:  index,
 	}
 }
 
 // capForHistory truncates text to maxHistoryFieldBytes on a UTF-8 rune boundary,
 // appending an elision marker that records how many bytes were dropped, so an
-// oversized stdout or return value cannot grow the controller's context without
-// bound. Text already within the cap is returned unchanged.
+// oversized stdout, return value, or error message cannot grow the controller's
+// context without bound. Text already within the cap is returned unchanged.
 func capForHistory(text string) string {
 	if len(text) <= maxHistoryFieldBytes {
 		return text
