@@ -22,9 +22,9 @@ const ControllerSystemPrompt = "" +
 	"\n" +
 	"## journal\n" +
 	"- journal.Boots() []BootInfo\n" +
-	"- journal.Query(filter QueryFilter) []Entry\n" +
+	"- journal.Query(filter *QueryFilter) []Entry\n" +
 	"- journal.Counts(bootID string, byField string) map[string]int\n" +
-	"- journal.Unique(field string, filter QueryFilter) []string\n" +
+	"- journal.Unique(field string, filter *QueryFilter) []string\n" +
 	"\n" +
 	"Types:\n" +
 	"  BootInfo { ID string; Index int; FirstSeen time.Time; LastSeen time.Time }\n" +
@@ -33,9 +33,10 @@ const ControllerSystemPrompt = "" +
 	"  QueryFilter { BootID, Unit, Grep string; MaxPriority *int; Limit int; Since, " +
 	"Until time.Time }\n" +
 	"\n" +
-	"MaxPriority is *int. new(4) allocates an int 4 and yields *int (Go 1.26), so " +
-	"write journal.QueryFilter{MaxPriority: new(4)}. A nil MaxPriority means no " +
-	"priority ceiling, keeping 0 (emerg) distinct from unset.\n" +
+	"Query and Unique take the filter by POINTER — pass it with the address-of form, " +
+	"e.g. journal.Query(&journal.QueryFilter{Unit: \"ssh.service\", MaxPriority: new(4)}). " +
+	"MaxPriority is *int: new(4) allocates an int 4 and yields *int (Go 1.26). A nil " +
+	"MaxPriority means no priority ceiling, keeping 0 (emerg) distinct from unset.\n" +
 	"\n" +
 	"## systemd\n" +
 	"- systemd.UnitStatus(name string) UnitStatus\n" +
