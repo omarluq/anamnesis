@@ -12,7 +12,6 @@ import (
 
 	"github.com/omarluq/anamnesis/internal/ana/journal"
 	"github.com/omarluq/anamnesis/internal/ana/repl"
-	"github.com/omarluq/anamnesis/internal/ana/repl/repltest"
 	"github.com/omarluq/anamnesis/internal/ana/rlm"
 	"github.com/omarluq/anamnesis/internal/openai"
 	"github.com/omarluq/anamnesis/internal/terminal"
@@ -79,12 +78,13 @@ func TestControllerRunResolvesFinalVarAnswer(t *testing.T) {
 	)
 }
 
-func TestControllerRunErrorsWhenDoneWithoutTerminalAnswer(t *testing.T) {
+func TestControllerRunForceFinishesWhenDoneWithoutTerminalAnswer(t *testing.T) {
 	t.Parallel()
 
-	// The controller reported Done but no terminal primitive resolved an answer:
-	// Final reports ok=false, so resolve surfaces the controller_missing_final fault
-	// rather than rendering an empty answer.
+	// The controller reported Done but no terminal primitive resolved an answer (every
+	// turn's code errored). Rather than failing the run with a raw error, resolve
+	// force-finishes with the honest incomplete note so the user sees a graceful message
+	// rather than a crash, and the run-end reason records "no_answer".
 	ctx := context.Background()
 	fixture := newSessionFixture()
 	eval := new(mockEvalCapture)
@@ -99,11 +99,9 @@ func TestControllerRunErrorsWhenDoneWithoutTerminalAnswer(t *testing.T) {
 	eval.On("Final").Return("", false).Once()
 
 	got, err := controller.Run(ctx)
-	require.Error(t, err)
-	assert.Empty(t, got)
-	require.ErrorContains(t, err, "done without a terminal answer")
-
-	repltest.RequireOopsCode(t, err, "rlm", "controller_missing_final")
+	require.NoError(t, err)
+	assert.Contains(t, got, "investigation incomplete")
+	assert.Equal(t, "no_answer", controller.FinishReason())
 
 	assert.Empty(t, fixture.session.History)
 	fixture.controller.AssertExpectations(t)

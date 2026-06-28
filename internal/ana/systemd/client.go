@@ -9,7 +9,7 @@ import (
 	"github.com/samber/oops"
 )
 
-// Client reads systemd unit state over the private systemd D-Bus connection. The
+// Client reads systemd unit state over the system D-Bus connection. The
 // connection is dialed lazily on the first read and reused for the Client's life,
 // so constructing a Client opens no bus connection and a Client assembles even
 // where the system bus is unreachable — the dial, and any failure it raises, is
@@ -21,7 +21,7 @@ type Client struct {
 	// conn is the cached systemd D-Bus connection, nil until the first read; the
 	// mutex below guards it so the bus is dialed once.
 	conn *dbus.Conn
-	// dial opens the private systemd D-Bus connection; the field is a seam so a
+	// dial opens the system D-Bus connection; the field is a seam so a
 	// test can inject a connection without a live bus.
 	dial func(ctx context.Context) (*dbus.Conn, error)
 	// mutex guards the lazily dialed connection so the bus is dialed once.
@@ -35,7 +35,7 @@ type Client struct {
 func NewClient() *Client {
 	return &Client{
 		conn:  nil,
-		dial:  dbus.NewSystemdConnectionContext,
+		dial:  dbus.NewSystemConnectionContext,
 		mutex: sync.Mutex{},
 	}
 }
@@ -70,9 +70,10 @@ func (client *Client) ListUnits(ctx context.Context, state string) ([]Unit, erro
 // UnitStatus returns the detailed status of the named unit, dialing the bus on
 // first use. The listing fields come from the unit record and MainPID is read
 // best-effort from the unit's Service property — units with no main process, or
-// non-service units, report a zero MainPID. An unknown unit yields the zero status
-// with no error, matching systemd's not-found unit semantics; a bus or listing
-// failure surfaces as an oops error tagged with the systemd domain.
+// non-service units, report a zero MainPID. An unknown or not-loaded unit yields a
+// not-found status (LoadState "not-found") with no error, so the caller can tell it
+// apart from a real unit with blank state; a bus or listing failure surfaces as an
+// oops error tagged with the systemd domain.
 func (client *Client) UnitStatus(ctx context.Context, name string) (UnitStatus, error) {
 	var empty UnitStatus
 
@@ -89,8 +90,20 @@ func (client *Client) UnitStatus(ctx context.Context, name string) (UnitStatus, 
 	status, found := lo.Find(statuses, func(candidate dbus.UnitStatus) bool {
 		return candidate.Name == name
 	})
-	if !found {
-		return empty, nil
+	// ListUnitsByNames returns a placeholder record with empty fields for a name that
+	// is not a currently-loaded unit — a wrong name, an alias that is not the loaded
+	// name, or a genuinely absent unit. Report that as a "not-found" LoadState so the
+	// controller can tell "no such unit" apart from a real unit with blank state and
+	// re-query systemd.ListUnits for the exact loaded name.
+	if !found || status.LoadState == "" {
+		return UnitStatus{
+			Name:        name,
+			Description: "",
+			LoadState:   "not-found",
+			ActiveState: "",
+			SubState:    "",
+			MainPID:     0,
+		}, nil
 	}
 
 	return UnitStatus{
@@ -116,7 +129,7 @@ func (client *Client) connection(ctx context.Context) (*dbus.Conn, error) {
 
 	dial := client.dial
 	if dial == nil {
-		dial = dbus.NewSystemdConnectionContext
+		dial = dbus.NewSystemConnectionContext
 	}
 
 	conn, err := dial(ctx)

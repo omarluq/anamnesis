@@ -2,6 +2,7 @@ package di
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/samber/do/v2"
 
@@ -9,6 +10,18 @@ import (
 	"github.com/omarluq/anamnesis/internal/ana/repl"
 	"github.com/omarluq/anamnesis/internal/ana/systemd"
 )
+
+// logSurfaceErr records a swallowed host-surface read failure to the operator log, so
+// an interpreted journal.* or systemd.* call that returns an empty result because the
+// underlying read FAILED can be told apart from one that genuinely found nothing — a
+// distinction the context-free, error-free host API cannot carry to the controller.
+func logSurfaceErr(surface, op string, err error) {
+	slog.Warn("host surface read failed; returning empty result",
+		slog.String("surface", surface),
+		slog.String("op", op),
+		slog.String("error", err.Error()),
+	)
+}
 
 // newJournalSurface provides the journal read surface investigationDeps resolves
 // per submit, backed by the sdjournal-reading journal.Client. The provider is lazy
@@ -38,6 +51,8 @@ var _ repl.Journal = (*journalSurface)(nil)
 func (surface *journalSurface) Boots() []journal.BootInfo {
 	boots, err := surface.client.Boots()
 	if err != nil {
+		logSurfaceErr("journal", "Boots", err)
+
 		return nil
 	}
 
@@ -48,6 +63,8 @@ func (surface *journalSurface) Boots() []journal.BootInfo {
 func (surface *journalSurface) Query(filter *journal.QueryFilter) []journal.Entry {
 	entries, err := surface.client.Query(filter)
 	if err != nil {
+		logSurfaceErr("journal", "Query", err)
+
 		return nil
 	}
 
@@ -58,6 +75,8 @@ func (surface *journalSurface) Query(filter *journal.QueryFilter) []journal.Entr
 func (surface *journalSurface) Counts(bootID, byField string) map[string]int {
 	counts, err := surface.client.Counts(bootID, byField)
 	if err != nil {
+		logSurfaceErr("journal", "Counts", err)
+
 		return nil
 	}
 
@@ -68,6 +87,8 @@ func (surface *journalSurface) Counts(bootID, byField string) map[string]int {
 func (surface *journalSurface) Unique(field string, filter *journal.QueryFilter) []string {
 	values, err := surface.client.Unique(field, filter)
 	if err != nil {
+		logSurfaceErr("journal", "Unique", err)
+
 		return nil
 	}
 
@@ -101,6 +122,8 @@ var _ repl.Systemd = (*systemdSurface)(nil)
 func (surface *systemdSurface) UnitStatus(name string) systemd.UnitStatus {
 	status, err := surface.client.UnitStatus(context.Background(), name)
 	if err != nil {
+		logSurfaceErr("systemd", "UnitStatus", err)
+
 		var empty systemd.UnitStatus
 
 		return empty
@@ -113,6 +136,8 @@ func (surface *systemdSurface) UnitStatus(name string) systemd.UnitStatus {
 func (surface *systemdSurface) ListUnits(state string) []systemd.Unit {
 	units, err := surface.client.ListUnits(context.Background(), state)
 	if err != nil {
+		logSurfaceErr("systemd", "ListUnits", err)
+
 		return nil
 	}
 

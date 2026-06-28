@@ -43,6 +43,7 @@ const (
 	finishFinal       forceFinishReason = "final"
 	finishCtxCanceled forceFinishReason = "ctx_canceled"
 	finishEvalTimeout forceFinishReason = "eval_timeout"
+	finishNoAnswer    forceFinishReason = "no_answer"
 )
 
 // EvalCapture is the interpreter seam the controller loop drives each turn:
@@ -363,15 +364,18 @@ func evalTimedOut(err error) bool {
 // resolve reads the terminal answer the interpreter holds once the model reports
 // Done and enforces the §7/§10 citation grounding gate before returning it: a run
 // that cited a cursor no journal query made visible this session fails here rather
-// than rendering a fabricated answer. It returns an oops error when no terminal
-// primitive resolved an answer, or when validateCitations rejects the citations.
+// than rendering a fabricated answer. When no terminal primitive resolved an answer
+// — the model reported Done after every turn's code errored — it force-finishes with
+// the honest incomplete note rather than failing the run. It returns an oops error
+// only when validateCitations rejects the citations.
 func (controller *Controller) resolve() (string, error) {
 	answer, ok := controller.eval.Final()
 	if !ok {
-		return "", oops.
-			In("rlm").
-			Code("controller_missing_final").
-			Errorf("controller reported done without a terminal answer")
+		// The model reported Done but never recorded a terminal answer — typically every
+		// turn's code errored, so agent.FINAL never ran. Force-finish with the honest
+		// "stopped without agent.FINAL" note rather than failing the whole run with a raw
+		// error the user reads as a crash.
+		return controller.forceFinish(finishNoAnswer), nil
 	}
 
 	if err := controller.validateCitations(); err != nil {
