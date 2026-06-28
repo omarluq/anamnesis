@@ -76,7 +76,7 @@ func captureJudgeRequest(t *testing.T, question, answer string, citations []stri
 	return body
 }
 
-func TestJudgeReturnsCritiqueVerdictAndUsage(t *testing.T) {
+func TestJudgeReturnsCritiqueVerdict(t *testing.T) {
 	t.Parallel()
 
 	verdict := openai.JudgeVerdict{
@@ -103,8 +103,6 @@ func TestJudgeReturnsCritiqueVerdictAndUsage(t *testing.T) {
 	assert.Equal(t, verdict, result.Verdict, "the structured approve/critique verdict round-trips")
 	assert.False(t, result.Verdict.Approve, "the judge rejected the answer")
 	assert.NotEmpty(t, result.Verdict.Critique, "a rejection carries a critique")
-	assert.Equal(t, openai.Usage{TokensIn: 845, TokensOut: 37}, result.Usage,
-		"the API usage block maps onto Usage")
 
 	transport.AssertExpectations(t)
 	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
@@ -133,8 +131,6 @@ func TestJudgeApprovesWithEmptyCritique(t *testing.T) {
 
 	assert.True(t, result.Verdict.Approve, "the judge approved the grounded answer")
 	assert.Empty(t, result.Verdict.Critique, "an approval carries no critique")
-	assert.Equal(t, openai.Usage{TokensIn: 612, TokensOut: 5}, result.Usage,
-		"the API usage block maps onto Usage")
 
 	transport.AssertExpectations(t)
 	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
@@ -230,7 +226,6 @@ func TestJudgeSurfacesCallFailure(t *testing.T) {
 
 	assert.Equal(t, openai.JudgeResult{
 		Verdict: openai.JudgeVerdict{Approve: false, Critique: ""},
-		Usage:   openai.Usage{TokensIn: 0, TokensOut: 0},
 	}, result, "a failed judge call yields the zero result")
 
 	oopsErr, ok := oops.AsOops(err)
@@ -272,7 +267,6 @@ func TestJudgeSurfacesDecodeFailure(t *testing.T) {
 
 	assert.Equal(t, openai.JudgeResult{
 		Verdict: openai.JudgeVerdict{Approve: false, Critique: ""},
-		Usage:   openai.Usage{TokensIn: 0, TokensOut: 0},
 	}, result, "a verdict that fails to decode yields the zero result")
 
 	oopsErr, ok := oops.AsOops(err)

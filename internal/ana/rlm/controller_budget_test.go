@@ -47,7 +47,7 @@ func TestControllerRunForceFinishesAfterTurnBudget(t *testing.T) {
 	assert.Equal(t, wantAnswer, got)
 	require.Len(t, fixture.session.History, maxTurns)
 
-	assertTurnEvents(t, drainTrace(events, maxTurns), thinking)
+	assertTurnEvents(t, drainTrace(events), thinking, maxTurns)
 
 	fixture.controller.AssertExpectations(t)
 	eval.AssertExpectations(t)
@@ -122,14 +122,14 @@ func TestControllerRunRecoversOverBudgetQueryPanic(t *testing.T) {
 	eval.AssertExpectations(t)
 }
 
-// widenTrace swaps the fixture's single-slot trace channel for a buffered one so a
-// multi-turn force-finish run can emit a turn event per recorded turn without the
-// emitter blocking on a full buffer, and returns the wide channel to drain.
+// widenTrace swaps the fixture's narrow trace channel for a wider buffered one so a
+// multi-turn force-finish run can emit every turn's events without the emitter
+// blocking on a full buffer, and returns the wide channel to drain.
 func widenTrace(fixture *sessionFixture) chan terminal.TraceEvent {
-	// One buffer slot per recorded turn (the loop emits a single thinking event per
-	// turn) plus one slot of headroom, so Emitter.Thinking never blocks before
+	// Three buffer slots per recorded turn — a thinking event, a code-start, and a
+	// code-end — plus headroom, so the synchronous emitter never blocks before
 	// drainTrace runs, and the buffer scales with the fixture's MaxTurns budget.
-	buffer := fixture.session.Budget.MaxTurns + 1
+	buffer := (fixture.session.Budget.MaxTurns + 1) * 3
 
 	events := make(chan terminal.TraceEvent, buffer)
 	fixture.session.Emitter = rlm.NewEmitter(context.Background(), events, fixtureRunID)
@@ -156,28 +156,48 @@ func scriptTurnEvals(eval *mockEvalCapture, code string, count int) []string {
 	return findings
 }
 
-// drainTrace reads exactly count events off the buffered trace channel a
-// force-finish run emitted, so a caller can assert against them once the loop has
-// returned.
-func drainTrace(events <-chan terminal.TraceEvent, count int) []terminal.TraceEvent {
-	drained := make([]terminal.TraceEvent, 0, count)
+// drainTrace reads every event a force-finish run buffered onto the trace channel,
+// stopping once the channel is momentarily empty — safe because the run has already
+// returned, so no further events are coming.
+func drainTrace(events <-chan terminal.TraceEvent) []terminal.TraceEvent {
+	drained := make([]terminal.TraceEvent, 0)
 
-	for range count {
-		drained = append(drained, <-events)
+	for {
+		select {
+		case event := <-events:
+			drained = append(drained, event)
+		default:
+			return drained
+		}
 	}
-
-	return drained
 }
 
-// assertTurnEvents asserts every drained event is a thinking event carrying the
-// controller's reasoning and this run's ID, proving the loop emitted one event per
-// recorded turn before it force-finished.
-func assertTurnEvents(t *testing.T, events []terminal.TraceEvent, thinking string) {
+// assertTurnEvents proves the loop streamed each of wantTurns recorded turns as a
+// thinking event followed by its code block: it asserts exactly wantTurns thinking
+// events (each carrying the reasoning and this run's ID) and a matching
+// code-start/code-end pair per turn.
+func assertTurnEvents(t *testing.T, events []terminal.TraceEvent, thinking string, wantTurns int) {
 	t.Helper()
 
+	thinkingCount, codeStarts, codeEnds := 0, 0, 0
+
 	for _, event := range events {
-		assert.Equal(t, terminal.TraceKindThinking, event.Kind)
-		assert.Equal(t, thinking, event.Text)
 		assert.Equal(t, fixtureRunID, event.RunID)
+
+		switch event.Kind {
+		case terminal.TraceKindThinking:
+			thinkingCount++
+
+			assert.Equal(t, thinking, event.Text)
+		case terminal.TraceKindCodeStart:
+			codeStarts++
+		case terminal.TraceKindCodeEnd:
+			codeEnds++
+		case terminal.TraceKindQueryStart, terminal.TraceKindQueryEnd, terminal.TraceKindFinal:
+		}
 	}
+
+	assert.Equal(t, wantTurns, thinkingCount, "one thinking event per recorded turn")
+	assert.Equal(t, wantTurns, codeStarts, "one code-start per turn with code")
+	assert.Equal(t, wantTurns, codeEnds, "one code-end per turn with code")
 }

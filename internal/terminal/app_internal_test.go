@@ -38,13 +38,13 @@ func TestFooterTitleAppendsSpinnerOnlyWhileWorking(t *testing.T) {
 	assert.Empty(t, app.spinnerGlyph())
 
 	// A thinking event marks the loop working, so the footer gains the spinner glyph.
-	app.applyTrace(traceEvent(TraceKindThinking, "thinking", 0, 0, 0, 0))
+	app.applyTrace(traceEvent(TraceKindThinking, "thinking", 0))
 	app.spinnerFrame = 0
 	assert.Equal(t, defaultTitle+" "+string(spinnerFrames[0]), app.footerTitle())
 	assert.NotEmpty(t, app.spinnerGlyph())
 
 	// A final event clears the working state and retires the spinner.
-	app.applyTrace(traceEvent(TraceKindFinal, "done", 0, 0, 0, 0))
+	app.applyTrace(traceEvent(TraceKindFinal, "done", 0))
 	assert.Equal(t, defaultTitle, app.footerTitle())
 	assert.Empty(t, app.spinnerGlyph())
 }
@@ -66,7 +66,7 @@ func TestApplyTraceBuildsTranscriptAcrossKinds(t *testing.T) {
 	app.applyTrace(traceDepthEvent(TraceKindQueryEnd, "the i915 driver oopsed", 1))
 	assert.False(t, app.history[1].Pending, "the query end settles the pending block")
 
-	app.applyTrace(traceEvent(TraceKindFinal, "**root cause:** firmware", 0, 0, 0, 0))
+	app.applyTrace(traceEvent(TraceKindFinal, "**root cause:** firmware", 0))
 
 	assert.Equal(t,
 		[]transcript.Role{transcript.RoleThinking, transcript.RoleToolResult, transcript.RoleAssistant},
@@ -74,18 +74,33 @@ func TestApplyTraceBuildsTranscriptAcrossKinds(t *testing.T) {
 		"the transcript holds the thinking, query, and assistant messages in order")
 }
 
-func TestApplyTraceUsageAccumulatesIntoFooterTotals(t *testing.T) {
+func TestApplyTraceCodeEventsRenderAsToolBlock(t *testing.T) {
 	t.Parallel()
 
 	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
 
-	app.applyTrace(traceEvent(TraceKindUsage, "", 2, 5, 250_000, 0))
-	app.applyTrace(traceEvent(TraceKindUsage, "", 4, 1, 250_000, 0))
+	code := "boots := journal.Boots()\nfmt.Println(len(boots))"
+	app.applyTrace(traceEvent(TraceKindCodeStart, code, 0))
 
-	assert.Equal(t, 6, app.tokensIn, "usage events tally input tokens")
-	assert.Equal(t, 6, app.tokensOut, "usage events tally output tokens")
-	assert.Equal(t, "$0.5000", app.dollars(), "usage events tally cost into the footer")
-	assert.Empty(t, app.history, "usage events never append a transcript message")
+	require.Len(t, app.history, 1)
+	require.True(t, app.working, "a code start marks the shell working")
+	require.True(t, app.history[0].Pending, "a code start opens a pending block")
+	assert.Equal(t, transcript.RoleBashExecution, app.history[0].Role, "a code block is a bash-execution message")
+
+	app.applyTrace(traceEvent(TraceKindCodeEnd, "3", 0))
+
+	require.Len(t, app.history, 1, "the code end settles the block in place rather than appending a new one")
+	assert.False(t, app.history[0].Pending, "the code end settles the pending block")
+
+	parsed := parseQueryContent(app.history[0].Content)
+	assert.Equal(t, codeName, parsed.Name, "the settled block is labeled as a code block")
+	assert.Contains(t, parsed.Args, "journal.Boots()", "the block carries the turn's Go source")
+	assert.Equal(t, "3", parsed.Output, "the block carries the captured output")
+
+	// A code block renders through the same tool-block path as a query block.
+	app.toolsExpanded = true
+	lines := app.renderMessage(80, app.history[0])
+	assert.NotEmpty(t, lines, "a code block renders through the tool-block path")
 }
 
 func TestApplyTraceFinalAppendsAssistantAndClearsSpinner(t *testing.T) {
@@ -93,10 +108,10 @@ func TestApplyTraceFinalAppendsAssistantAndClearsSpinner(t *testing.T) {
 
 	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
 
-	app.applyTrace(traceEvent(TraceKindThinking, "investigating", 0, 0, 0, 0))
+	app.applyTrace(traceEvent(TraceKindThinking, "investigating", 0))
 	require.True(t, app.working)
 
-	app.applyTrace(traceEvent(TraceKindFinal, "**root cause:** disk full", 0, 0, 0, 0))
+	app.applyTrace(traceEvent(TraceKindFinal, "**root cause:** disk full", 0))
 
 	assert.False(t, app.working, "a final answer clears the working state")
 	assert.Equal(t, transcript.RoleAssistant, app.history[len(app.history)-1].Role)
@@ -115,13 +130,13 @@ func TestApplyTraceQueryEventsKeepWorkingUntilFinal(t *testing.T) {
 		Title:      defaultTitle,
 	})
 
-	app.applyTrace(traceEvent(TraceKindQueryStart, "query start", 0, 0, 0, 0))
+	app.applyTrace(traceEvent(TraceKindQueryStart, "query start", 0))
 	require.True(t, app.working, "a query start marks the shell working")
 
-	app.applyTrace(traceEvent(TraceKindQueryEnd, "query end", 0, 0, 0, 0))
+	app.applyTrace(traceEvent(TraceKindQueryEnd, "query end", 0))
 	assert.True(t, app.working, "a query end is mid-turn and should not clear the spinner")
 
-	app.applyTrace(traceEvent(TraceKindFinal, "done", 0, 0, 0, 0))
+	app.applyTrace(traceEvent(TraceKindFinal, "done", 0))
 	assert.False(t, app.working, "the final answer clears the working state")
 }
 
@@ -153,7 +168,7 @@ func TestStartRunBeginsControllerRunAndIgnoresSubmitWhileWorking(t *testing.T) {
 
 	ctrl := new(mockController)
 	ctrl.On("Start", mock.Anything, "first question", uint64(1)).
-		Return(scriptedTrace(1, traceEvent(TraceKindThinking, "looking", 0, 0, 0, 0))).
+		Return(scriptedTrace(1, traceEvent(TraceKindThinking, "looking", 0))).
 		Once()
 
 	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: ctrl, Title: defaultTitle})
@@ -336,26 +351,20 @@ func TestLoopAppliesMatchingTraceAndIgnoresStaleRunID(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- app.loop(context.Background()) }()
 
-	// Matching RunID (0): the final answer appends and the usage event tallies.
-	sendTrace(t, traceCh, traceEvent(TraceKindFinal, "answer", 0, 0, 0, 0))
-	sendTrace(t, traceCh, traceEvent(TraceKindUsage, "", 4, 10, 1_500_000, 0))
+	// Matching RunID (0): the final answer appends to the transcript.
+	sendTrace(t, traceCh, traceEvent(TraceKindFinal, "answer", 0))
 
-	// Stale RunID: both events must be dropped by the loop's run gating.
-	sendTrace(t, traceCh, traceEvent(TraceKindFinal, "stale", 0, 0, 0, 99))
-	sendTrace(t, traceCh, traceEvent(TraceKindUsage, "", 7, 8, 9_000_000, 99))
+	// Stale RunID: the event must be dropped by the loop's run gating.
+	sendTrace(t, traceCh, traceEvent(TraceKindFinal, "stale", 99))
 
-	awaitContents(t, screen, "$1.5000")
+	awaitContents(t, screen, "answer")
 	screen.inject(tcell.NewEventKey(tcell.KeyCtrlC, "", tcell.ModNone))
 	require.NoError(t, awaitLoop(t, done))
 
 	require.Len(t, app.history, 1, "only the matching final event appended a message")
-	assert.Equal(t, 4, app.tokensIn)
-	assert.Equal(t, 10, app.tokensOut)
-	assert.Equal(t, "$1.5000", app.dollars())
 
 	contents := screen.contents()
 	assert.Contains(t, contents, "answer")
-	assert.Contains(t, contents, "$1.5000")
 	assert.NotContains(t, contents, "stale", "the stale-RunID answer never rendered")
 }
 
@@ -388,9 +397,8 @@ func TestAppRendersTranscriptComposerFooterAndQuits(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- app.loop(context.Background()) }()
 
-	sendTrace(t, traceCh, traceEvent(TraceKindFinal, "final answer", 0, 0, 0, 0))
-	sendTrace(t, traceCh, traceEvent(TraceKindUsage, "", 5, 7, 2_000_000, 0))
-	awaitContents(t, screen, "$2.0000")
+	sendTrace(t, traceCh, traceEvent(TraceKindFinal, "final answer", 0))
+	awaitContents(t, screen, "final answer")
 
 	screen.inject(tcell.NewEventKey(tcell.KeyCtrlC, "", tcell.ModNone))
 	require.NoError(t, awaitLoop(t, done), "the run loop returns cleanly on quit")
@@ -400,9 +408,8 @@ func TestAppRendersTranscriptComposerFooterAndQuits(t *testing.T) {
 
 	// Transcript: the appended assistant answer.
 	assert.Contains(t, contents, "final answer", "the transcript renders the assistant answer")
-	// Footer: the title, the usage totals, and the key hints — no side panes.
+	// Footer: the title and the key hints — no side panes, no usage totals.
 	footer := screenRow(t, contents, "anamnesis")
-	assert.Contains(t, footer, "$2.0000", "the footer renders the accumulated cost")
 	assert.Contains(t, footer, "ctrl+o queries", "the footer renders the key hints")
 	assert.NotContains(t, contents, "Trace", "no trace pane is rendered")
 	assert.NotContains(t, contents, "Metric", "no cost pane is rendered")

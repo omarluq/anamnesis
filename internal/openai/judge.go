@@ -68,24 +68,21 @@ type JudgeVerdict struct {
 	Approve bool `json:"approve" jsonschema:"description=True iff every factual claim is supported by a cited entry"`
 }
 
-// JudgeResult is the judge pass's outcome: the parsed verdict the model produced
-// plus the token usage the call consumed, so the loop can both act on the verdict
-// (render the answer or hand the controller a critique to retry) and bill the
-// pass against the session budget.
+// JudgeResult is the judge pass's outcome: the parsed verdict the model produced,
+// so the loop can act on the verdict (render the answer or hand the controller a
+// critique to retry).
 type JudgeResult struct {
 	// Verdict is the decoded approve/critique reply for this pass.
 	Verdict JudgeVerdict
-	// Usage is the input/output token count the API reported for this call.
-	Usage Usage
 }
 
 // Judge runs the post-FINAL audit pass against gpt-5.5: it sends the §16 judge
 // instructions and an input framing the original question, the investigator's
 // final answer, and the cited journal entries under the JudgeVerdict
 // structured-output schema, then decodes the model's JSON reply into a
-// JudgeVerdict and pairs it with the call's token usage. It runs on the same
-// flagship Model as the controller and sub-LLM — there is no cheaper judge model
-// — so a key without gpt-5.5 access fails loudly here too.
+// JudgeVerdict. It runs on the same flagship Model as the controller and sub-LLM
+// — there is no cheaper judge model — so a key without gpt-5.5 access fails
+// loudly here too.
 func (client *Client) Judge(
 	ctx context.Context,
 	question, answer string,
@@ -117,10 +114,7 @@ func (client *Client) Judge(
 		return failedJudgePass(err)
 	}
 
-	return JudgeResult{
-		Verdict: parsed,
-		Usage:   usageFrom(&resp.Usage),
-	}, nil
+	return JudgeResult{Verdict: parsed}, nil
 }
 
 // buildJudgeInput renders the judge input from the original question, the
@@ -153,6 +147,5 @@ func renderCitations(citations []string) string {
 func failedJudgePass(err error) (JudgeResult, error) {
 	return JudgeResult{
 		Verdict: JudgeVerdict{Approve: false, Critique: ""},
-		Usage:   Usage{TokensIn: 0, TokensOut: 0},
 	}, err
 }

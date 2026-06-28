@@ -16,7 +16,6 @@ func TestTraceKindStringValues(t *testing.T) {
 	assert.Equal(t, "query-start", string(TraceKindQueryStart))
 	assert.Equal(t, "query-end", string(TraceKindQueryEnd))
 	assert.Equal(t, "final", string(TraceKindFinal))
-	assert.Equal(t, "usage", string(TraceKindUsage))
 }
 
 // TestTraceEventCarriesEveryField proves a TraceEvent value preserves each of the
@@ -25,20 +24,14 @@ func TestTraceEventCarriesEveryField(t *testing.T) {
 	t.Parallel()
 
 	event := TraceEvent{
-		Kind:       TraceKindQueryStart,
-		Text:       "summarize the panic backtrace",
-		TokensIn:   1280,
-		TokensOut:  256,
-		CostMicros: 900_000,
-		Depth:      2,
-		RunID:      42,
+		Kind:  TraceKindQueryStart,
+		Text:  "summarize the panic backtrace",
+		Depth: 2,
+		RunID: 42,
 	}
 
 	assert.Equal(t, TraceKindQueryStart, event.Kind)
 	assert.Equal(t, "summarize the panic backtrace", event.Text)
-	assert.Equal(t, 1280, event.TokensIn)
-	assert.Equal(t, 256, event.TokensOut)
-	assert.Equal(t, int64(900_000), event.CostMicros)
 	assert.Equal(t, 2, event.Depth)
 	assert.Equal(t, uint64(42), event.RunID)
 }

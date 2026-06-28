@@ -308,10 +308,13 @@ func (controller *Controller) critiqueDirective() string {
 	return critiqueHeader + controller.critique
 }
 
-// recordTurn evaluates the turn's generated Go, appends the resulting
-// ControllerTurn to the session history, and emits the turn's reasoning as a
-// thinking trace event. The turn index is the current history length, so it stays unique and
-// monotonic even when RunAudited re-enters Run for a §5 revision pass against a
+// recordTurn streams the turn's reasoning and code to the transcript, evaluates the
+// turn's generated Go, and appends the resulting ControllerTurn to the session
+// history. It emits in execution order — the thinking, then the code block opening,
+// then (after evaluation) the code block's captured output — so a turn that fans out
+// via agent.Query shows its sub-call blocks nested between the code's start and its
+// settled output. The turn index is the current history length, so it stays unique
+// and monotonic even when RunAudited re-enters Run for a §5 revision pass against a
 // history that already holds the earlier turns. An evaluation fault — including a
 // recovered over-budget agent.Query panic — is recorded on the turn rather than
 // aborting the loop, so the controller sees the error on its next turn and can
@@ -319,6 +322,14 @@ func (controller *Controller) critiqueDirective() string {
 func (controller *Controller) recordTurn(response openai.ControllerResponse) {
 	index := len(controller.session.History)
 	label := fmt.Sprintf("turn_%d", index)
+
+	controller.session.Emitter.Thinking(thinkingTrace(response))
+
+	hasCode := strings.TrimSpace(response.Code) != ""
+	if hasCode {
+		controller.session.Emitter.CodeStart(response.Code)
+	}
+
 	result, evalErr := controller.evalTurn(label, response.Code)
 
 	controller.session.History = append(
@@ -326,7 +337,39 @@ func (controller *Controller) recordTurn(response openai.ControllerResponse) {
 		newControllerTurn(index, response, result, evalErr),
 	)
 
-	controller.session.Emitter.Thinking(response.Thinking)
+	if hasCode {
+		controller.session.Emitter.CodeEnd(codeOutput(result, evalErr))
+	}
+}
+
+// codeOutput renders a turn's evaluation result for the transcript's code block:
+// any evaluation error first so a failed turn shows what went wrong, then the
+// captured stdout, then the final expression's value. Empty sections are omitted so
+// a silent turn renders an empty block rather than blank-line noise.
+func codeOutput(result repl.Result, evalErr error) string {
+	sections := make([]string, 0, 3)
+
+	if errText := renderErr(evalErr); errText != "" {
+		sections = append(sections, "error: "+errText)
+	}
+
+	if stdout := strings.TrimRight(result.Stdout, "\n"); stdout != "" {
+		sections = append(sections, stdout)
+	}
+
+	if retval := renderRetval(result.Retval); retval != "" {
+		sections = append(sections, retval)
+	}
+
+	return strings.Join(sections, "\n")
+}
+
+// thinkingTrace picks the text the turn's thinking trace renders: the model's
+// reasoning summary when the Responses API returned one — it reads as fuller prose
+// than the schema's terse Thinking field — falling back to that brief Thinking
+// field when no summary was produced.
+func thinkingTrace(response openai.ControllerResponse) string {
+	return mo.EmptyableToOption(response.Reasoning).OrElse(response.Thinking)
 }
 
 // evalTurn runs the turn's generated Go through the interpreter, recovering an

@@ -82,7 +82,7 @@ func captureSubRequest(t *testing.T, prompt, evidence string) []byte {
 	return body
 }
 
-func TestSubReturnsTextReplyAndUsage(t *testing.T) {
+func TestSubReturnsTextReply(t *testing.T) {
 	t.Parallel()
 
 	const reply = "sshd failed at 09:01: port 22 already in use; the prior instance never released it."
@@ -103,8 +103,6 @@ func TestSubReturnsTextReplyAndUsage(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, reply, result.Text, "the sub-LLM text reply round-trips")
-	assert.Equal(t, openai.Usage{TokensIn: 612, TokensOut: 88}, result.Usage,
-		"the API usage block maps onto Usage")
 
 	transport.AssertExpectations(t)
 	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
@@ -180,10 +178,7 @@ func TestSubSurfacesModelNotFoundWithNoFallback(t *testing.T) {
 	result, err := client.Sub(context.Background(), "Summarize the failures.", "[]journal.Entry{}")
 	require.Error(t, err)
 
-	assert.Equal(t, openai.SubResult{
-		Text:  "",
-		Usage: openai.Usage{TokensIn: 0, TokensOut: 0},
-	}, result, "a failed sub-call yields the zero result")
+	assert.Equal(t, openai.SubResult{Text: ""}, result, "a failed sub-call yields the zero result")
 
 	oopsErr, ok := oops.AsOops(err)
 	require.True(t, ok, "the error is oops-wrapped")

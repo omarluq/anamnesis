@@ -37,6 +37,20 @@ func (emitter *Emitter) Thinking(text string) {
 	emitter.emit(terminal.TraceKindThinking, text, 0)
 }
 
+// CodeStart emits the opening event of a controller turn's code evaluation,
+// carrying the generated Go source as the code block's body. The chat transcript
+// opens a pending code block that CodeEnd later settles with the captured output.
+func (emitter *Emitter) CodeStart(code string) {
+	emitter.emit(terminal.TraceKindCodeStart, code, 0)
+}
+
+// CodeEnd emits the closing event of a controller turn's code evaluation, carrying
+// the captured stdout, return value, and any evaluation error as the output that
+// settles the pending code block CodeStart opened.
+func (emitter *Emitter) CodeEnd(output string) {
+	emitter.emit(terminal.TraceKindCodeEnd, output, 0)
+}
+
 // QueryStart emits the opening event of an agent.Query sub-call at depth, carrying
 // the sub-call prompt as the query block's args. depth indents the block so nested
 // fan-out reads as a tree; QueryEnd at the same depth completes it.
@@ -56,30 +70,13 @@ func (emitter *Emitter) Final(text string) {
 	emitter.emit(terminal.TraceKindFinal, text, 0)
 }
 
-// Usage emits a usage event carrying input/output token counts and the step cost
-// in millionths of a US dollar, for the footer's running totals.
-func (emitter *Emitter) Usage(tokensIn, tokensOut int, costMicros int64) {
-	emitter.send(terminal.TraceEvent{
-		Kind:       terminal.TraceKindUsage,
-		Text:       "",
-		TokensIn:   tokensIn,
-		TokensOut:  tokensOut,
-		CostMicros: costMicros,
-		RunID:      emitter.runID,
-		Depth:      0,
-	})
-}
-
 // emit sends a text-only event of the given kind at depth, stamped with the run ID.
 func (emitter *Emitter) emit(kind terminal.TraceKind, text string, depth int) {
 	emitter.send(terminal.TraceEvent{
-		Kind:       kind,
-		Text:       text,
-		TokensIn:   0,
-		TokensOut:  0,
-		CostMicros: 0,
-		RunID:      emitter.runID,
-		Depth:      depth,
+		Kind:  kind,
+		Text:  text,
+		RunID: emitter.runID,
+		Depth: depth,
 	})
 }
 

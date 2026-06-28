@@ -64,6 +64,15 @@ type ControllerResponse struct {
 	Thinking string `json:"thinking" jsonschema:"description=Brief reasoning for what to do next"`
 	// Code is the Go source to evaluate this turn, empty when Done is true.
 	Code string `json:"code" jsonschema:"description=Go source to evaluate, or empty if Done"`
+	// Reasoning is the model's reasoning summary for this turn — the prose the
+	// Responses API returns when asked for reasoning.summary, which reads far better
+	// than the terse Thinking field. It is populated out-of-band from the response's
+	// reasoning output item, not from the model's structured JSON reply, so it is
+	// excluded from the schema and from JSON (de)serialization with json:"-" and is
+	// empty when the turn returned no reasoning summary. exhaustruct:"optional"
+	// because it is call metadata: existing ControllerResponse literals need not set
+	// it, just as they need not invent a reasoning summary the model never returned.
+	Reasoning string `json:"-" exhaustruct:"optional"`
 	// Done is true once a prior turn called agent.FINAL and the answer is ready.
 	Done bool `json:"done" jsonschema:"description=True iff agent.FINAL was called in a prior turn"`
 }

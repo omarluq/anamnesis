@@ -44,7 +44,7 @@ func TestAppIntegrationReplayDrivesTranscriptAndDropsStaleRunID(t *testing.T) {
 
 	// A superseded run's final answer arrives on the run-zero channel and is gated
 	// out by RunID before it can touch the transcript.
-	sendTrace(t, ambient, traceEvent(TraceKindFinal, staleAnswer, 0, 0, 0, staleRunID))
+	sendTrace(t, ambient, traceEvent(TraceKindFinal, staleAnswer, staleRunID))
 
 	// The user submits a query and the replay controller drives the scripted
 	// investigation to its FINAL answer.
@@ -77,8 +77,7 @@ func TestAppIntegrationReplayDrivesTranscriptAndDropsStaleRunID(t *testing.T) {
 	assert.NotContains(t, contents, "Trace", "no trace pane is rendered")
 	assert.NotContains(t, contents, "Metric", "no cost pane is rendered")
 
-	// The footer accumulated the script's two usage meters into the session totals.
+	// The footer is the title and the key hints — no usage or cost accounting.
 	footer := screenRow(t, contents, "anamnesis")
-	assert.Contains(t, footer, "1,792 in / 384 out", "the footer renders the accumulated token usage")
-	assert.Contains(t, footer, "$1.5000", "the footer renders the accumulated cost")
+	assert.Contains(t, footer, "ctrl+o queries", "the footer renders the key hints")
 }
