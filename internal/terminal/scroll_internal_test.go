@@ -89,6 +89,40 @@ func TestDrawTranscriptClampsScrollAndRevealsTop(t *testing.T) {
 	assert.Contains(t, renderedFrameText(frame), "MSG00", "fully scrolled up reveals the oldest message")
 }
 
+// TestDrawTranscriptHoldsViewportWhileStreaming pins that appending new lines while
+// the user is scrolled up holds their viewport in place instead of letting it drift
+// toward the tail: the offset grows by the transcript's line growth so the same
+// window stays in view.
+func TestDrawTranscriptHoldsViewportWhileStreaming(t *testing.T) {
+	t.Parallel()
+
+	const (
+		width  = 40
+		height = 5
+	)
+
+	app := newApp(newFakeScreen(width, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+	appendUserMessages(app, 12)
+
+	rect := tui.Rect{X: 0, Y: 0, Width: width, Height: height}
+
+	before := tui.NewCellBuffer(width, height, app.theme.fg(app.theme.Text))
+	app.scroll = 4
+	app.drawTranscript(before, rect)
+	linesBefore := app.prevTotalLines
+
+	appendUserMessages(app, 6)
+
+	after := tui.NewCellBuffer(width, height, app.theme.fg(app.theme.Text))
+	app.drawTranscript(after, rect)
+
+	grown := app.prevTotalLines - linesBefore
+	require.Positive(t, grown, "appending messages grows the transcript")
+	assert.Equal(t, 4+grown, app.scroll, "the offset grows by the transcript growth so the viewport holds")
+	assert.Equal(t, renderedFrameText(before), renderedFrameText(after),
+		"the same window stays in view while new lines stream in")
+}
+
 // TestScrollByLiftsTheWindow pins that a positive delta lifts the window and that
 // deltas accumulate.
 func TestScrollByLiftsTheWindow(t *testing.T) {

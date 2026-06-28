@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	openaisdk "github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/responses"
 	"github.com/samber/oops"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -186,14 +187,17 @@ func controllerResponseBody(t *testing.T, reply openai.ControllerResponse) strin
 
 // newControllerClient builds an openai client whose Responses calls are served by
 // transport, pointed at a stub base URL so no request leaves the process. The API
-// key comes from the ambient environment TestMain seeded.
-func newControllerClient(t *testing.T, transport http.RoundTripper) *openai.Client {
+// key comes from the ambient environment TestMain seeded. Extra opts (such as
+// WithControllerEffort) append after the stub wiring so a test can tune the client.
+func newControllerClient(t *testing.T, transport http.RoundTripper, opts ...openai.Option) *openai.Client {
 	t.Helper()
 
-	client, err := openai.NewClient(
+	clientOpts := append([]openai.Option{
 		openai.WithBaseURL("https://stub.anamnesis.test/v1/"),
 		openai.WithTransport(transport),
-	)
+	}, opts...)
+
+	client, err := openai.NewClient(clientOpts...)
 	require.NoError(t, err)
 
 	return client
@@ -355,7 +359,7 @@ func TestControllerSurfacesModelNotFoundWithNoFallback(t *testing.T) {
 // records the outgoing request body during RoundTrip, returning that raw body so a
 // test can assert on what actually went over the wire (model id, the §6 token cap,
 // the strict structured-output schema, and the instructions and input).
-func captureControllerRequest(t *testing.T, instructions, input string) []byte {
+func captureControllerRequest(t *testing.T, instructions, input string, opts ...openai.Option) []byte {
 	t.Helper()
 
 	var body []byte
@@ -380,7 +384,7 @@ func captureControllerRequest(t *testing.T, instructions, input string) []byte {
 		}), nil).
 		Once()
 
-	client := newControllerClient(t, transport)
+	client := newControllerClient(t, transport, opts...)
 
 	_, err := client.Controller(context.Background(), instructions, input, nil)
 	require.NoError(t, err)
@@ -427,10 +431,10 @@ func TestControllerRequestSendsModelEffortAndStrictSchema(t *testing.T) {
 	assert.Equal(t, "controller_response", payload.Text.Format.Name, "the structured-output schema is named")
 	assert.True(t, payload.Text.Format.Strict, "strict structured-output adherence is enabled")
 
-	// The turn reasons at maximum effort (xhigh) — it is the investigation brain — while
-	// still asking for an auto reasoning summary so the loop can render that prose as the
-	// turn's live thinking. Decoded separately to keep the request-shape struct above
-	// unchanged.
+	// The turn reasons at the client's configured controller effort — medium by
+	// default — while still asking for an auto reasoning summary so the loop can render
+	// that prose as the turn's live thinking. Decoded separately to keep the
+	// request-shape struct above unchanged.
 	var reasoning struct {
 		Reasoning struct {
 			Effort  string `json:"effort"`
@@ -439,10 +443,36 @@ func TestControllerRequestSendsModelEffortAndStrictSchema(t *testing.T) {
 	}
 
 	require.NoError(t, json.Unmarshal(body, &reasoning))
-	assert.Equal(t, "xhigh", reasoning.Reasoning.Effort,
-		"the controller turn reasons at maximum effort")
+	assert.Equal(t, "medium", reasoning.Reasoning.Effort,
+		"the controller turn reasons at the default medium effort")
 	assert.Equal(t, "auto", reasoning.Reasoning.Summary,
 		"the turn asks gpt-5.5 for an auto reasoning summary to render as the turn's thinking")
+}
+
+// TestControllerRequestCarriesConfiguredEffort proves the configured controller
+// effort reaches the wire, not just the client struct: a client built with an
+// explicit WithControllerEffort sends that tier in the request's reasoning.effort,
+// confirming controller.go reads the stored effort rather than a constant.
+func TestControllerRequestCarriesConfiguredEffort(t *testing.T) {
+	t.Parallel()
+
+	const (
+		instructions = "the RLM controller system prompt"
+		input        = "USER: why did sshd fail at 09:01?"
+	)
+
+	body := captureControllerRequest(t, instructions, input,
+		openai.WithControllerEffort(responses.ReasoningEffortXhigh))
+
+	var reasoning struct {
+		Reasoning struct {
+			Effort string `json:"effort"`
+		} `json:"reasoning"`
+	}
+
+	require.NoError(t, json.Unmarshal(body, &reasoning))
+	assert.Equal(t, "xhigh", reasoning.Reasoning.Effort,
+		"the configured controller effort is sent on the wire")
 }
 
 func TestControllerDecodesAnswerSplitAcrossTwoDeltas(t *testing.T) {

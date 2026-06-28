@@ -25,6 +25,14 @@ const (
 	valLogLevel    = "info"
 	valLogFormat   = "json"
 	envDevelopment = "development"
+
+	keyReasoningController = "reasoning.controller"
+	keyReasoningSub        = "reasoning.sub"
+	keyReasoningJudge      = "reasoning.judge"
+
+	valReasoningController = "medium"
+	valReasoningSub        = "low"
+	valReasoningJudge      = "medium"
 )
 
 func TestRootCmdHelpListsCommands(t *testing.T) {
@@ -98,6 +106,11 @@ func TestConfigEntries(t *testing.T) {
 	cfg := &config.Config{
 		App:     config.AppConfig{Name: valAppName, Env: valAppEnv},
 		Logging: config.LoggingConfig{Level: valLogLevel, Format: valLogFormat, File: ""},
+		Reasoning: config.ReasoningConfig{
+			Controller: valReasoningController,
+			Sub:        valReasoningSub,
+			Judge:      valReasoningJudge,
+		},
 	}
 
 	lookup := lo.SliceToMap(configEntries(cfg), func(e configEntry) (string, string) {
@@ -105,10 +118,13 @@ func TestConfigEntries(t *testing.T) {
 	})
 
 	assert.Equal(t, map[string]string{
-		keyAppName:   valAppName,
-		keyAppEnv:    valAppEnv,
-		keyLogLevel:  valLogLevel,
-		keyLogFormat: valLogFormat,
+		keyAppName:             valAppName,
+		keyAppEnv:              valAppEnv,
+		keyLogLevel:            valLogLevel,
+		keyLogFormat:           valLogFormat,
+		keyReasoningController: valReasoningController,
+		keyReasoningSub:        valReasoningSub,
+		keyReasoningJudge:      valReasoningJudge,
 	}, lookup)
 }
 

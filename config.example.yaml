@@ -6,3 +6,13 @@ logging:
   level: info
   format: pretty
   # file: ana.log  # log destination; empty resolves to $XDG_STATE_HOME/ana/ana.log
+
+# Per-role model reasoning effort. Each value is one of:
+#   none, minimal, low, medium, high, xhigh   (case-insensitive)
+# Higher tiers reason harder at the cost of slower turns. Defaults favor
+# responsiveness over the former maximum-effort setting. Override per role here or
+# via the ANAMNESIS_REASONING_CONTROLLER / _SUB / _JUDGE environment variables.
+reasoning:
+  controller: medium  # the §6 investigation turn loop (the investigation brain)
+  sub: low            # bounded, high-volume sub-LLM analysis calls
+  judge: medium       # the post-FINAL audit judge

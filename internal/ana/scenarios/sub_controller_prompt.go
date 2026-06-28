@@ -5,9 +5,12 @@ package scenarios
 // child runs the same mvm REPL surface as the top-level loop, but it is scoped to
 // one focused sub-question handed down with a bounded context payload, and its
 // budgets (recursion depth, sub-calls, wall time) are shared with the whole tree.
-// It steers the child to decompose only when the evidence is genuinely too large,
-// to ground its answer in the provided context plus its own journal queries, and
-// to return a terse FINAL the parent splices back as the sub-call result.
+// It guides the child to decompose by delegation — fan a multi-unit, multi-boot, or
+// more-than-~50-entry span out to agent.Query rather than reasoning over raw entries
+// itself — but, unlike the root, it carries no mandatory fan-out: the child recurses
+// judiciously because it already sits one level deep and shares the tree's budget; it
+// grounds its answer in the provided context plus its own journal queries and returns a
+// terse FINAL the parent splices back as the sub-call result.
 //
 // The leaf base case (depth == MaxDepth) does NOT use this prompt: it falls back
 // to the flat SubLLMSystemPrompt sub-call, which reasons over the context only.
@@ -28,9 +31,13 @@ const SubControllerPrompt = "" +
 	"Work the sub-question under these constraints:\n" +
 	"- Start from the context payload you were handed and reason over it before you " +
 	"issue any new journal query.\n" +
-	"- Recurse further ONLY when the evidence would still exceed ~5000 tokens after " +
-	"you have processed it in Go. You already sit one level deep, so a needless " +
-	"agent.Query wastes budget the parent is counting on.\n" +
+	"- Decompose by delegation: when your sub-question " +
+	"itself spans more than one unit, more than one boot, or more than ~50 entries, hand " +
+	"that analysis to agent.Query or agent.QueryBatched instead of reasoning over raw " +
+	"entries or full histograms yourself. The root controller's mandatory " +
+	"fan-out-before-FINAL rule is NOT yours: you already sit one level deep and share the " +
+	"tree's budget, so fan out only on a genuine multi-unit span — a needless agent.Query " +
+	"wastes budget the parent is counting on.\n" +
 	"- Budgets are SHARED across the whole investigation tree: recursion depth, " +
 	"sub-calls, and wall time are spent jointly with the parent and every sibling. " +
 	"Stay terse.\n" +

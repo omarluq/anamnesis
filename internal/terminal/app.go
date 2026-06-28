@@ -51,27 +51,26 @@ type RunOptions struct {
 
 // App is the mutable shell state owned by the single loop goroutine.
 type App struct {
-	screen     tcell.Screen
-	controller Controller
-	renderer   *tui.Renderer
-	cancel     context.CancelFunc
-	traceCh    <-chan TraceEvent
-	title      string
-	history    []chatMessage
-	composer   tui.TextArea
-
-	spinnerFrame int
-	caretColumn  int
-	caretRow     int
-	runID        uint64
-	scroll       int // Lines lifted above the bottom; 0 pins the transcript to the tail.
-
-	theme Theme
-
-	caretVisible  bool
-	toolsExpanded bool
-	dirty         bool
-	working       bool
+	screen         tcell.Screen
+	controller     Controller
+	renderer       *tui.Renderer
+	cancel         context.CancelFunc
+	traceCh        <-chan TraceEvent
+	title          string
+	history        []chatMessage
+	composer       tui.TextArea
+	cache          transcriptCache
+	spinnerFrame   int
+	caretColumn    int
+	caretRow       int
+	runID          uint64
+	scroll         int
+	prevTotalLines int
+	theme          Theme
+	caretVisible   bool
+	toolsExpanded  bool
+	dirty          bool
+	working        bool
 }
 
 // newApp builds an App bound to screen with the default theme. Query blocks start
@@ -80,24 +79,26 @@ func newApp(screen tcell.Screen, opts RunOptions) *App {
 	title := mo.EmptyableToOption(opts.Title).OrElse(defaultTitle)
 
 	return &App{
-		screen:        screen,
-		renderer:      tui.NewRenderer(screen),
-		controller:    opts.Controller,
-		cancel:        nil,
-		traceCh:       opts.Trace,
-		title:         title,
-		history:       nil,
-		composer:      tui.NewTextArea(),
-		theme:         DefaultTheme(),
-		caretColumn:   0,
-		caretRow:      0,
-		runID:         0,
-		spinnerFrame:  0,
-		scroll:        0,
-		caretVisible:  false,
-		toolsExpanded: false,
-		dirty:         false,
-		working:       false,
+		screen:         screen,
+		renderer:       tui.NewRenderer(screen),
+		controller:     opts.Controller,
+		cancel:         nil,
+		traceCh:        opts.Trace,
+		title:          title,
+		history:        nil,
+		cache:          emptyTranscriptCache(),
+		composer:       tui.NewTextArea(),
+		theme:          DefaultTheme(),
+		caretColumn:    0,
+		caretRow:       0,
+		runID:          0,
+		spinnerFrame:   0,
+		scroll:         0,
+		prevTotalLines: -1,
+		caretVisible:   false,
+		toolsExpanded:  false,
+		dirty:          false,
+		working:        false,
 	}
 }
 
@@ -170,6 +171,7 @@ func (app *App) drawIfDirty() {
 // active run.
 func (app *App) handleTrace(event TraceEvent, ok bool) {
 	if !ok {
+		app.settlePending()
 		app.traceCh = nil
 		app.working = false
 		app.dirty = true
@@ -259,13 +261,26 @@ func (app *App) renderFrame(frame *tui.CellBuffer, width, height int) {
 // bottom-anchored and lifted by app.scroll lines. The offset is re-clamped against
 // the current rendered-line count every frame so it stays valid as block heights
 // change (pending→settled, ctrl+o expansion, resize); at scroll 0 the window is the
-// last rect.Height lines, preserving the previous tail-follow behavior.
+// last rect.Height lines, preserving the tail-follow behavior.
+//
+// While the user is scrolled up, app.scroll is grown by the transcript's line growth
+// since the last frame so the visible rows stay put as new lines stream in: without
+// it the bottom-anchored offset would let every appended line push the window down,
+// making mid-run scrollback drift out from under the reader. prevTotalLines starts
+// negative so the first frame only establishes the baseline rather than compensating
+// against a zero count.
 func (app *App) drawTranscript(frame *tui.CellBuffer, rect tui.Rect) {
 	if rect.Empty() {
 		return
 	}
 
 	lines := app.transcriptLines(rect.Width)
+
+	if app.prevTotalLines >= 0 && app.scroll > 0 && len(lines) > app.prevTotalLines {
+		app.scroll += len(lines) - app.prevTotalLines
+	}
+
+	app.prevTotalLines = len(lines)
 	app.scroll = min(max(0, app.scroll), max(0, len(lines)-rect.Height))
 	top := len(lines) - rect.Height - app.scroll
 
@@ -287,18 +302,17 @@ func (app *App) scrollToBottom() {
 }
 
 // transcriptLines renders every history message into one stacked line slice, or
-// the welcome line when the transcript is empty.
+// the welcome line when the transcript is empty. The per-message render cache backs
+// this: an unchanged message returns its cached lines rather than re-wrapping and
+// re-highlighting from scratch, and an unchanged transcript returns the memoized flatten
+// untouched, so a mid-run frame tick costs O(visible) work instead of re-rendering the
+// whole history.
 func (app *App) transcriptLines(width int) []tui.Line {
 	if len(app.history) == 0 {
 		return app.renderMarkdown(welcomeText, width)
 	}
 
-	lines := make([]tui.Line, 0, len(app.history)*messageMetadataRows)
-	for _, message := range app.history {
-		lines = append(lines, app.renderMessage(width, message)...)
-	}
-
-	return lines
+	return app.cache.lines(app, width)
 }
 
 // drawComposer renders the bordered composer into rect and records the caret.

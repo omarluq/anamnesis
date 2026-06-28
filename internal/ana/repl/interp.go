@@ -19,6 +19,12 @@ import (
 	"github.com/samber/oops"
 )
 
+// CodeEvalTimedOut is the oops code EvalContext stamps on the error it returns when an
+// eval does not finish within its effective timeout. The rlm controller matches on this
+// shared sentinel rather than the literal string, so the eval-timeout contract has a
+// single source of truth across the repl boundary.
+const CodeEvalTimedOut = "eval_timed_out"
+
 // Interpreter wraps an mvm interpreter preloaded with the Go standard library.
 // Each Eval runs a named source fragment against the shared session state and
 // captures its output into per-turn buffers. The zero value is not usable;
@@ -129,12 +135,20 @@ func (interpreter *Interpreter) EvalContext(
 	interpreter.stdout.Reset()
 	interpreter.stderr.Reset()
 
+	// If the shared deadline has already elapsed or ctx is already canceled, there is
+	// no budget to run this turn: spawning evalAsync would only leak a goroutine the
+	// select abandons on its first tick. Return the timeout result without starting it.
+	budget := effectiveTimeout(ctx, timeout)
+	if ctx.Err() != nil || budget <= 0 {
+		return interpreter.timedOut(name, timeout)
+	}
+
 	// Buffered (cap 1) so the abandoned eval goroutine can always deliver its
 	// outcome and exit, even after a timeout has made this select stop listening.
 	done := make(chan evalOutcome, 1)
 	go interpreter.evalAsync(name, src, done)
 
-	timer := time.NewTimer(effectiveTimeout(ctx, timeout))
+	timer := time.NewTimer(budget)
 	defer timer.Stop()
 
 	select {
@@ -190,7 +204,7 @@ func (interpreter *Interpreter) timedOut(name string, timeout time.Duration) (Re
 
 	err := oops.
 		In("repl").
-		Code("eval_timed_out").
+		Code(CodeEvalTimedOut).
 		Errorf(
 			"eval %q exceeded %s; the generated code did not return (possible non-terminating loop)",
 			name,

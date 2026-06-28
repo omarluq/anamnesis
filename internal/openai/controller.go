@@ -53,12 +53,13 @@ func (client *Client) Controller(
 		Instructions: openaisdk.String(instructions),
 		Input:        responses.ResponseNewParamsInputUnion{OfString: openaisdk.String(input)},
 		Text:         responses.ResponseTextConfigParam{Format: format},
-		// Reason at maximum effort: this is the investigation brain, so let gpt-5.5 think
-		// as hard as it can. Summary:auto surfaces a readable prose summary of that
-		// reasoning, which streamResponses accumulates from the reasoning-summary deltas
-		// and renders as the turn's live thinking.
+		// Reason at the client's configured controller effort (default medium): this is
+		// the investigation brain, but the effort is tunable per role so a turn need not
+		// pay maximum-effort latency. Summary:auto surfaces a readable prose summary of
+		// that reasoning, which streamResponses accumulates from the reasoning-summary
+		// deltas and renders as the turn's live thinking.
 		Reasoning: responses.ReasoningParam{
-			Effort:  responses.ReasoningEffortXhigh,
+			Effort:  client.controllerEffort,
 			Summary: responses.ReasoningSummaryAuto,
 		},
 	}, onReasoning, "controller")

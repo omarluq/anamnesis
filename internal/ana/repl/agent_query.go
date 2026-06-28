@@ -15,8 +15,10 @@ const (
 	DefaultMaxDepth = 3
 	// DefaultMaxSubCalls is the §6 per-session sub-call budget: the total number of
 	// agent.Query and agent.QueryBatched sub-calls a single investigation may spend
-	// before the budget is exhausted.
-	DefaultMaxSubCalls = 30
+	// before the budget is exhausted. It is the value the DI layer seeds the tree-wide
+	// budget with (di/register.go), so it must match the figure the §14 controller
+	// prompt advertises (60).
+	DefaultMaxSubCalls = 60
 )
 
 // SubLLM is the bounded, non-recursive sub-call seam that agent.Query and

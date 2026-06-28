@@ -50,6 +50,8 @@ func TestSubControllerPromptDeclaresSharedBudget(t *testing.T) {
 
 	assert.Contains(t, prompt, "SHARED across the whole investigation tree",
 		"the child must know its depth and sub-call budgets are shared tree-wide")
-	assert.Contains(t, prompt, "Recurse further ONLY when",
-		"the child must be steered away from needless recursion")
+	assert.Contains(t, prompt, "Decompose by delegation",
+		"the child should still delegate genuinely large sub-questions")
+	assert.Contains(t, prompt, "fan out only on a genuine multi-unit span",
+		"the child must recurse judiciously, not carry the root's mandatory fan-out")
 }
