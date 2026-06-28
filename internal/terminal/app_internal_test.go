@@ -104,6 +104,28 @@ func TestApplyTraceFinalAppendsAssistantAndClearsSpinner(t *testing.T) {
 	assert.Contains(t, transcriptText(app, 70), "root cause:", "the final answer markdown lands in the transcript")
 }
 
+// TestApplyTraceQueryEventsKeepWorkingUntilFinal pins the spinner semantics of the
+// query lifecycle: a query start marks the loop working, a query end arrives
+// mid-turn and must leave the spinner running, and only the final answer clears it.
+func TestApplyTraceQueryEventsKeepWorkingUntilFinal(t *testing.T) {
+	t.Parallel()
+
+	app := newApp(newFakeScreen(80, 24), RunOptions{
+		Trace:      nil,
+		Controller: nil,
+		Title:      defaultTitle,
+	})
+
+	app.applyTrace(traceEvent(TraceKindQueryStart, "query start", 0, 0, 0, 0))
+	require.True(t, app.working, "a query start marks the shell working")
+
+	app.applyTrace(traceEvent(TraceKindQueryEnd, "query end", 0, 0, 0, 0))
+	assert.True(t, app.working, "a query end is mid-turn and should not clear the spinner")
+
+	app.applyTrace(traceEvent(TraceKindFinal, "done", 0, 0, 0, 0))
+	assert.False(t, app.working, "the final answer clears the working state")
+}
+
 func TestQueryToggleAndThinkingToggleRevealContent(t *testing.T) {
 	t.Parallel()
 
