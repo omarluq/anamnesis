@@ -23,11 +23,14 @@ import (
 func TestInterpreterDeniesHostEffectPackages(t *testing.T) {
 	t.Parallel()
 
+	deniedWrite := `os.WriteFile(` + strconv.Quote(filepath.Join(t.TempDir(), "ana_denied")) +
+		`, []byte("x"), 0644)`
+
 	cases := []struct {
 		name string
 		src  string
 	}{
-		{"os.WriteFile auto-import", `os.WriteFile("/tmp/ana_denied", []byte("x"), 0644)`},
+		{"os.WriteFile auto-import", deniedWrite},
 		{"os.ReadFile auto-import", `os.ReadFile("/etc/passwd")`},
 		{"os explicit import", "import \"os\"\nos.Getpid()"},
 		{"os/exec auto-import", `exec.Command("id").CombinedOutput()`},

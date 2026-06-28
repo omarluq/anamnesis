@@ -104,7 +104,7 @@ func TestRunChatWithDrivesControllerToFinal(t *testing.T) {
 		chatTrace(terminal.TraceKindThinking, chatTurnLine),
 		chatTrace(terminal.TraceKindFinal, chatFinalAnswer),
 	)
-	controller.On("Start", mock.Anything, chatQuery, mock.Anything, chatRunID).Return(channel)
+	controller.On("Start", mock.Anything, chatQuery, "", chatRunID).Return(channel)
 
 	var (
 		lines    []string
@@ -126,7 +126,7 @@ func TestRunChatWithDrivesControllerToFinal(t *testing.T) {
 	require.NoError(t, runChatWith(context.Background(), controller, runner))
 	assert.Equal(t, chatFinalAnswer, rendered, "the FINAL answer reaches the drain")
 	assert.Contains(t, lines, chatTurnLine, "a real trace turn reaches the drain, not an echoed line")
-	controller.AssertCalled(t, "Start", mock.Anything, chatQuery, mock.Anything, chatRunID)
+	controller.AssertCalled(t, "Start", mock.Anything, chatQuery, "", chatRunID)
 	controller.AssertExpectations(t)
 }
 

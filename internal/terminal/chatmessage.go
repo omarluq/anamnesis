@@ -72,8 +72,8 @@ func (app *App) appendAssistant(markdown string) {
 }
 
 // maxPriorExchanges caps how many recent question/answer pairs the follow-up
-// preamble carries, and maxPriorAnswerRunes truncates each prior answer, so a long
-// session can never grow the preamble without bound.
+// preamble carries, and maxPriorAnswerRunes truncates each prior question and answer,
+// so a long session can never grow the preamble without bound.
 const (
 	maxPriorExchanges   = 6
 	maxPriorAnswerRunes = 800
@@ -126,7 +126,7 @@ func priorConversation(history []chatMessage) string {
 
 	for _, exchange := range exchanges {
 		builder.WriteString("\nQ: ")
-		builder.WriteString(exchange.question)
+		builder.WriteString(truncateRunes(exchange.question, maxPriorAnswerRunes))
 		builder.WriteString("\nA: ")
 		builder.WriteString(truncateRunes(exchange.answer, maxPriorAnswerRunes))
 		builder.WriteString("\n")

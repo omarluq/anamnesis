@@ -80,13 +80,25 @@ func (deps HostDeps) registerJournal(interpreter *Interpreter) error {
 	return nil
 }
 
-// registerSystemd installs the systemd surface as the interpreted systemd
-// package. It delegates to RegisterSurface because systemd needs only its methods
-// exposed: no value types are bound as symbols, since the surface already exports a
-// UnitStatus function and a type of the same name would collide in the package
-// table, so source reads the returned status fields by reflection without ever
-// naming the type. registerJournal cannot delegate likewise — it must bind the
-// BootInfo/Entry/QueryFilter types between the reflect and import steps.
+// registerSystemd installs the systemd surface as the interpreted systemd package
+// together with the constructible systemd.Unit value type, so source can both call
+// the read methods and build []systemd.Unit slices — for example to merge several
+// ListUnits results into one slice before sorting it. Without the bound type a
+// `[]systemd.Unit{}` literal or `var x []systemd.Unit` declaration has an element
+// type the interpreter cannot resolve, so a later field access fails with
+// "undefined: Name". The UnitStatus TYPE is deliberately not bound: the surface
+// already exports a UnitStatus function, and a type of the same name would collide in
+// the package symbol table, so source reads a returned UnitStatus's fields by
+// reflection without ever naming the type. Unit has no such collision.
 func (deps HostDeps) registerSystemd(interpreter *Interpreter) error {
-	return RegisterSurface[Systemd](interpreter, "systemd", deps.Systemd)
+	symbols, err := surfaceFuncs("systemd", reflect.TypeFor[Systemd](), reflect.ValueOf(deps.Systemd))
+	if err != nil {
+		return err
+	}
+
+	symbols["Unit"] = typeBinding[systemd.Unit]()
+
+	importSurface(interpreter, "systemd", symbols)
+
+	return nil
 }
