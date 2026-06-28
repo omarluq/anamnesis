@@ -186,11 +186,10 @@ func (app *App) handleTrace(event TraceEvent, ok bool) {
 }
 
 // applyTrace translates a trace event into a transcript mutation: thinking deltas
-// stream into a live thinking block and the final thinking settles it; code starts,
-// query starts, and the judge start mark the loop busy and append their blocks; a
-// code end, a query end (matched to its start by QueryID), and the judge end
-// complete their pending blocks; and a final answer clears the busy state and
-// appends the assistant markdown.
+// stream into a live thinking block and the final thinking settles it; code starts
+// and query starts mark the loop busy and append their blocks; a code end and a
+// query end (matched to its start by QueryID) complete their pending blocks; and a
+// final answer clears the busy state and appends the assistant markdown.
 func (app *App) applyTrace(event TraceEvent) {
 	switch event.Kind {
 	case TraceKindThinkingDelta:
@@ -213,12 +212,6 @@ func (app *App) applyTrace(event TraceEvent) {
 		app.appendQueryStart(event.QueryID, event.Text)
 	case TraceKindQueryEnd:
 		app.completeQuery(event.QueryID, event.Text)
-	case TraceKindJudgeStart:
-		app.working = true
-
-		app.appendJudgeStart(event.Text)
-	case TraceKindJudgeEnd:
-		app.completeJudge(event.Text)
 	case TraceKindFinal:
 		app.working = false
 
@@ -521,7 +514,7 @@ func (app *App) startRun(ctx context.Context, query string) {
 	app.cancel = cancel
 	app.runID++
 	app.working = true
-	app.traceCh = app.controller.Start(runCtx, query, app.runID)
+	app.traceCh = app.controller.Start(runCtx, query, priorConversation(app.history), app.runID)
 }
 
 // cancelRun cancels the active run's context, if any, releasing its controller.

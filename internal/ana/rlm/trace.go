@@ -96,18 +96,6 @@ func (emitter *Emitter) QueryEnd(queryID uint64, result string, depth int) {
 	})
 }
 
-// JudgeStart emits the opening event of the §16 judge pass, carrying the answer
-// under review; the transcript opens a pending judge block at depth 0.
-func (emitter *Emitter) JudgeStart(answer string) {
-	emitter.emit(terminal.TraceKindJudgeStart, answer)
-}
-
-// JudgeEnd emits the closing event of the §16 judge pass, carrying the judge's
-// critique — empty on approval; the transcript settles the pending judge block.
-func (emitter *Emitter) JudgeEnd(critique string) {
-	emitter.emit(terminal.TraceKindJudgeEnd, critique)
-}
-
 // Final emits the final-answer event carrying text.
 func (emitter *Emitter) Final(text string) {
 	emitter.emit(terminal.TraceKindFinal, text)

@@ -64,7 +64,6 @@ func TestInvestigateRunsTwoTurnInvestigation(t *testing.T) {
 
 	controllerLLM := new(mockControllerLLM)
 	sub := new(mockSubLLM)
-	judge := new(mockJudger)
 	journalHost := new(repltest.MockJournal)
 	systemdHost := new(repltest.MockSystemd)
 	events := make(chan terminal.TraceEvent, investigateTraceBuffer)
@@ -82,12 +81,10 @@ func TestInvestigateRunsTwoTurnInvestigation(t *testing.T) {
 	scriptControllerTurns(controllerLLM, question, turn0, turn1, turn2)
 	journalHost.On("Query", mock.Anything).Return(entries).Once()
 	sub.On("Answer", mock.Anything, subPrompt, mock.Anything).Return(answer, nil).Once()
-	judge.On("Judge", mock.Anything, question, answer, mock.Anything).Return("", nil).Once()
 
 	deps := rlm.Deps{
 		Controller:  controllerLLM,
 		Sub:         sub,
-		Judge:       judge,
 		Journal:     journalHost,
 		Systemd:     systemdHost,
 		Events:      events,
@@ -96,7 +93,7 @@ func TestInvestigateRunsTwoTurnInvestigation(t *testing.T) {
 		MaxSubCalls: repl.DefaultMaxSubCalls,
 	}
 
-	got, err := rlm.Investigate(context.Background(), question, &deps)
+	got, err := rlm.Investigate(context.Background(), question, "", &deps)
 	require.NoError(t, err)
 	assert.Equal(t, answer, got)
 
@@ -105,7 +102,6 @@ func TestInvestigateRunsTwoTurnInvestigation(t *testing.T) {
 	controllerLLM.AssertNumberOfCalls(t, "Respond", 3)
 	controllerLLM.AssertExpectations(t)
 	sub.AssertExpectations(t)
-	judge.AssertExpectations(t)
 	journalHost.AssertExpectations(t)
 }
 
@@ -130,7 +126,6 @@ func TestInvestigateSurfacesControllerFailure(t *testing.T) {
 	deps := rlm.Deps{
 		Controller:  controllerLLM,
 		Sub:         new(mockSubLLM),
-		Judge:       new(mockJudger),
 		Journal:     new(repltest.MockJournal),
 		Systemd:     new(repltest.MockSystemd),
 		Events:      events,
@@ -139,7 +134,7 @@ func TestInvestigateSurfacesControllerFailure(t *testing.T) {
 		MaxSubCalls: repl.DefaultMaxSubCalls,
 	}
 
-	got, err := rlm.Investigate(context.Background(), question, &deps)
+	got, err := rlm.Investigate(context.Background(), question, "", &deps)
 	require.Error(t, err)
 	assert.Empty(t, got)
 	require.ErrorContains(t, err, "controller turn request")
@@ -205,7 +200,7 @@ func assertTraceSequence(
 		case terminal.TraceKindQueryStart, terminal.TraceKindQueryEnd:
 			assert.Equal(t, 1, event.Depth, "the root sub-call renders one level under its depth-0 turn")
 		case terminal.TraceKindThinkingDelta, terminal.TraceKindThinking,
-			terminal.TraceKindJudgeStart, terminal.TraceKindJudgeEnd, terminal.TraceKindFinal:
+			terminal.TraceKindFinal:
 		}
 
 		if cursor < len(want) && event.Kind == want[cursor].kind && event.Text == want[cursor].text {

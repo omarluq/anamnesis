@@ -12,18 +12,17 @@ builds:
   - id: ana
     main: ./cmd/ana
     binary: ana
+    # anamnesis reads the systemd journal through libsystemd's sdjournal (cgo)
+    # and is Linux-only by construction: internal/ana/journal/sdjournal.go is
+    # //go:build linux and internal/di/hostsurfaces.go calls journal.NewClient
+    # unconditionally, so the binary does not compile for darwin/windows. Build
+    # only linux/amd64 with cgo, matching the CI build job (ana-linux-amd64).
     env:
-      - CGO_ENABLED=0
+      - CGO_ENABLED=1
     goos:
       - linux
-      - darwin
-      - windows
     goarch:
       - amd64
-      - arm64
-    ignore:
-      - goos: windows
-        goarch: arm64
     ldflags:
       - -s -w
       - -X github.com/omarluq/anamnesis/internal/vinfo.version={{.Version}}|{{.Commit}}|{{.Date}}
@@ -32,10 +31,6 @@ archives:
   - id: default
     formats:
       - tar.gz
-    format_overrides:
-      - goos: windows
-        formats:
-          - zip
     name_template: >-
       {{ .ProjectName }}_
       {{- .Version }}_

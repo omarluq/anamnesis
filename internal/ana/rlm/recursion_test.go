@@ -61,7 +61,6 @@ func TestInvestigateRecursesThroughChildControllerLoop(t *testing.T) {
 
 	controllerLLM := new(mockControllerLLM)
 	sub := new(mockSubLLM)
-	judge := new(mockJudger)
 	events := make(chan terminal.TraceEvent, investigateTraceBuffer)
 
 	rootTurn := openai.ControllerResponse{
@@ -74,12 +73,10 @@ func TestInvestigateRecursesThroughChildControllerLoop(t *testing.T) {
 	scriptControllerTurns(controllerLLM, question, rootTurn, rootDone)
 	scriptChildControllerTurns(controllerLLM, childCode)
 	sub.On("Answer", mock.Anything, "leaf question", "[x]").Return(answer, nil).Once()
-	judge.On("Judge", mock.Anything, question, answer, mock.Anything).Return("", nil).Once()
 
 	deps := rlm.Deps{
 		Controller:  controllerLLM,
 		Sub:         sub,
-		Judge:       judge,
 		Journal:     new(repltest.MockJournal),
 		Systemd:     new(repltest.MockSystemd),
 		Events:      events,
@@ -88,7 +85,7 @@ func TestInvestigateRecursesThroughChildControllerLoop(t *testing.T) {
 		MaxSubCalls: repl.DefaultMaxSubCalls,
 	}
 
-	got, err := rlm.Investigate(context.Background(), question, &deps)
+	got, err := rlm.Investigate(context.Background(), question, "", &deps)
 	require.NoError(t, err)
 	assert.Equal(t, answer, got, "the child loop's FINAL splices back as the root answer")
 
@@ -96,7 +93,6 @@ func TestInvestigateRecursesThroughChildControllerLoop(t *testing.T) {
 		mock.Anything, mock.Anything)
 	sub.AssertCalled(t, "Answer", mock.Anything, "leaf question", "[x]")
 	sub.AssertExpectations(t)
-	judge.AssertExpectations(t)
 }
 
 // TestInvestigateSharedBudgetCapsSubCallsTreeWide proves the §6 sub-call budget is
@@ -112,7 +108,6 @@ func TestInvestigateSharedBudgetCapsSubCallsTreeWide(t *testing.T) {
 
 	controllerLLM := new(mockControllerLLM)
 	sub := new(mockSubLLM)
-	judge := new(mockJudger)
 	events := make(chan terminal.TraceEvent, investigateTraceBuffer)
 
 	rootTurn := openai.ControllerResponse{
@@ -124,12 +119,10 @@ func TestInvestigateSharedBudgetCapsSubCallsTreeWide(t *testing.T) {
 
 	scriptControllerTurns(controllerLLM, question, rootTurn, rootDone)
 	scriptChildControllerTurns(controllerLLM, childCode)
-	judge.On("Judge", mock.Anything, question, mock.Anything, mock.Anything).Return("", nil).Once()
 
 	deps := rlm.Deps{
 		Controller:  controllerLLM,
 		Sub:         sub,
-		Judge:       judge,
 		Journal:     new(repltest.MockJournal),
 		Systemd:     new(repltest.MockSystemd),
 		Events:      events,
@@ -138,7 +131,7 @@ func TestInvestigateSharedBudgetCapsSubCallsTreeWide(t *testing.T) {
 		MaxSubCalls: 1,
 	}
 
-	got, err := rlm.Investigate(context.Background(), question, &deps)
+	got, err := rlm.Investigate(context.Background(), question, "", &deps)
 	require.NoError(t, err)
 	assert.Contains(t, got, "sub-investigation skipped",
 		"the child's sub-call finds the shared budget already spent and degrades to text")
@@ -148,7 +141,6 @@ func TestInvestigateSharedBudgetCapsSubCallsTreeWide(t *testing.T) {
 	controllerLLM.AssertCalled(t, "Respond", mock.Anything, scenarios.SubControllerPrompt,
 		mock.Anything, mock.Anything)
 	sub.AssertNotCalled(t, "Answer")
-	judge.AssertExpectations(t)
 }
 
 // TestInvestigateQueryBatchedFanOutRacesCleanly drives a wide agent.QueryBatched
@@ -166,7 +158,6 @@ func TestInvestigateQueryBatchedFanOutRacesCleanly(t *testing.T) {
 
 	controllerLLM := new(mockControllerLLM)
 	sub := new(mockSubLLM)
-	judge := new(mockJudger)
 	events := make(chan terminal.TraceEvent, investigateTraceBuffer+fanOut)
 
 	rootTurn := openai.ControllerResponse{Thinking: "fan out", Code: fanOutCode(fanOut), Done: false}
@@ -174,12 +165,10 @@ func TestInvestigateQueryBatchedFanOutRacesCleanly(t *testing.T) {
 
 	scriptControllerTurns(controllerLLM, question, rootTurn, rootDone)
 	sub.On("Answer", mock.Anything, mock.Anything, mock.Anything).Return("ok", nil)
-	judge.On("Judge", mock.Anything, question, "ok", mock.Anything).Return("", nil).Once()
 
 	deps := rlm.Deps{
 		Controller:  controllerLLM,
 		Sub:         sub,
-		Judge:       judge,
 		Journal:     new(repltest.MockJournal),
 		Systemd:     new(repltest.MockSystemd),
 		Events:      events,
@@ -188,7 +177,7 @@ func TestInvestigateQueryBatchedFanOutRacesCleanly(t *testing.T) {
 		MaxSubCalls: repl.DefaultMaxSubCalls,
 	}
 
-	got, err := rlm.Investigate(context.Background(), question, &deps)
+	got, err := rlm.Investigate(context.Background(), question, "", &deps)
 	require.NoError(t, err)
 	assert.Equal(t, "ok", got)
 	sub.AssertNumberOfCalls(t, "Answer", fanOut)
@@ -212,7 +201,6 @@ func TestInvestigateRecursiveFanOutKeepsEveryBranch(t *testing.T) {
 
 	controllerLLM := new(mockControllerLLM)
 	sub := new(mockSubLLM)
-	judge := new(mockJudger)
 	events := make(chan terminal.TraceEvent, investigateTraceBuffer+fanOut*5)
 
 	rootTurn := openai.ControllerResponse{Thinking: "fan out and recurse", Code: fanOutCode(fanOut), Done: false}
@@ -234,12 +222,10 @@ func TestInvestigateRecursiveFanOutKeepsEveryBranch(t *testing.T) {
 		Return(childDone, nil).
 		Times(fanOut)
 	sub.On("Answer", mock.Anything, "leaf question", "[x]").Return("ok", nil)
-	judge.On("Judge", mock.Anything, question, "ok", mock.Anything).Return("", nil).Once()
 
 	deps := rlm.Deps{
 		Controller:  controllerLLM,
 		Sub:         sub,
-		Judge:       judge,
 		Journal:     new(repltest.MockJournal),
 		Systemd:     new(repltest.MockSystemd),
 		Events:      events,
@@ -248,7 +234,7 @@ func TestInvestigateRecursiveFanOutKeepsEveryBranch(t *testing.T) {
 		MaxSubCalls: repl.DefaultMaxSubCalls,
 	}
 
-	got, err := rlm.Investigate(context.Background(), question, &deps)
+	got, err := rlm.Investigate(context.Background(), question, "", &deps)
 	require.NoError(t, err)
 	assert.Equal(t, "ok", got)
 	sub.AssertNumberOfCalls(t, "Answer", fanOut)

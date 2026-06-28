@@ -1,5 +1,5 @@
 // Package openai constructs the OpenAI API client anamnesis issues its
-// controller, sub-LLM, and judge calls through. It reads the API key from the
+// controller and sub-LLM calls through. It reads the API key from the
 // environment, fails closed with an oops error when the key is absent, and
 // exposes seams that let tests inject an HTTP transport and a base-URL override
 // so the whole layer is exercisable with no live network.
@@ -21,25 +21,23 @@ const EnvOpenAIKey = "OPENAI_API_KEY"
 
 // Default reasoning effort per model role, applied when NewClient is called without
 // the matching WithXEffort option. They mirror the config-layer defaults: the
-// controller and judge reason at medium, the high-volume sub-calls at low, trading
-// the former maximum-effort setting's minutes-long turns for responsiveness. The DI
-// layer overrides all three from config, so these defaults bound only direct,
-// option-less construction (chiefly tests).
+// controller reasons at medium, the high-volume sub-calls at low, trading the former
+// maximum-effort setting's minutes-long turns for responsiveness. The DI layer
+// overrides both from config, so these defaults bound only direct, option-less
+// construction (chiefly tests).
 const (
 	defaultControllerEffort = responses.ReasoningEffortMedium
 	defaultSubEffort        = responses.ReasoningEffortLow
-	defaultJudgeEffort      = responses.ReasoningEffortMedium
 )
 
 // Client wraps the openai-go SDK client behind the anamnesis package boundary so
-// the controller, sub-LLM, and judge layers all depend on one constructed handle
-// rather than scattering SDK construction across the codebase. The per-role
-// reasoning efforts are resolved once at construction and read by Controller, Sub,
-// and Judge respectively, so each role's effort is tuned in one place.
+// the controller and sub-LLM layers both depend on one constructed handle rather
+// than scattering SDK construction across the codebase. The per-role reasoning
+// efforts are resolved once at construction and read by Controller and Sub
+// respectively, so each role's effort is tuned in one place.
 type Client struct {
 	controllerEffort responses.ReasoningEffort
 	subEffort        responses.ReasoningEffort
-	judgeEffort      responses.ReasoningEffort
 	api              openaisdk.Client
 }
 
@@ -53,7 +51,6 @@ type settings struct {
 	baseURL          string
 	controllerEffort responses.ReasoningEffort
 	subEffort        responses.ReasoningEffort
-	judgeEffort      responses.ReasoningEffort
 }
 
 // WithBaseURL overrides the OpenAI API base URL, chiefly to point tests at a
@@ -90,15 +87,6 @@ func WithSubEffort(effort responses.ReasoningEffort) Option {
 	}
 }
 
-// WithJudgeEffort sets the reasoning effort the post-FINAL audit judge runs at,
-// overriding defaultJudgeEffort. The DI layer resolves it from
-// config.Reasoning.Judge via ParseEffort.
-func WithJudgeEffort(effort responses.ReasoningEffort) Option {
-	return func(set *settings) {
-		set.judgeEffort = effort
-	}
-}
-
 // NewClient reads OPENAI_API_KEY from the environment and returns a Client bound
 // to it. It returns an oops error when the key is unset or empty. Options may
 // override the base URL and HTTP transport for testing.
@@ -109,7 +97,6 @@ func NewClient(opts ...Option) (*Client, error) {
 		baseURL:          "",
 		controllerEffort: defaultControllerEffort,
 		subEffort:        defaultSubEffort,
-		judgeEffort:      defaultJudgeEffort,
 	}
 	for _, opt := range opts {
 		opt(&set)
@@ -138,6 +125,5 @@ func NewClient(opts ...Option) (*Client, error) {
 		api:              openaisdk.NewClient(requestOpts...),
 		controllerEffort: set.controllerEffort,
 		subEffort:        set.subEffort,
-		judgeEffort:      set.judgeEffort,
 	}, nil
 }

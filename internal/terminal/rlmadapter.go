@@ -3,14 +3,21 @@ package terminal
 import "context"
 
 // Investigator runs one investigation of query end to end, publishing its trace
-// events — thinking turns, agent.Query starts and ends, usage meters and the FINAL
-// answer — onto events, each stamped with runID. It returns
-// the final answer and a nil error on success, or a non-nil error when the run
-// could not be assembled or driven to completion. The live RLM adapter binds
-// rlm.Investigate to this shape and the di layer supplies the host collaborators
-// behind it, which keeps the terminal package free of any rlm import and so out
-// of the rlm → terminal trace-event dependency that would otherwise cycle.
-type Investigator func(ctx context.Context, query string, events chan<- TraceEvent, runID uint64) (string, error)
+// events — thinking turns, agent.Query starts and ends, and the FINAL answer —
+// onto events, each stamped with runID. priorContext is the prior-conversation
+// preamble folded ahead of query so a follow-up resolves against earlier answers;
+// it is empty for the first question of a session. It returns the final answer and
+// a nil error on success, or a non-nil error when the run could not be assembled or
+// driven to completion. The live RLM adapter binds rlm.Investigate to this shape
+// and the di layer supplies the host collaborators behind it, which keeps the
+// terminal package free of any rlm import and so out of the rlm → terminal
+// trace-event dependency that would otherwise cycle.
+type Investigator func(
+	ctx context.Context,
+	query, priorContext string,
+	events chan<- TraceEvent,
+	runID uint64,
+) (string, error)
 
 // rlmController is the live Controller the chat shell drives: it adapts an
 // Investigator to the Controller seam, owning the trace channel's lifecycle so
@@ -45,12 +52,12 @@ var _ Controller = (*rlmController)(nil)
 // routing their late sends at the never-closed inner channel — which the emitter
 // already abandons once the run context is canceled — makes a post-teardown emit
 // a safe no-op, while out still closes to tell the shell the run ended.
-func (adapter *rlmController) Start(ctx context.Context, query string, runID uint64) <-chan TraceEvent {
+func (adapter *rlmController) Start(ctx context.Context, query, priorContext string, runID uint64) <-chan TraceEvent {
 	out := make(chan TraceEvent)
 	inner := make(chan TraceEvent)
 	runDone := make(chan struct{})
 
-	go adapter.run(ctx, query, runID, inner, runDone)
+	go adapter.run(ctx, query, priorContext, runID, inner, runDone)
 	go adapter.pump(ctx, inner, out, runDone)
 
 	return out
@@ -66,14 +73,14 @@ func (adapter *rlmController) Start(ctx context.Context, query string, runID uin
 // send-to-closed-channel — the hazard the run/pump split exists to remove.
 func (adapter *rlmController) run(
 	ctx context.Context,
-	query string,
+	query, priorContext string,
 	runID uint64,
 	events chan<- TraceEvent,
 	runDone chan<- struct{},
 ) {
 	defer close(runDone)
 
-	if _, err := adapter.investigate(ctx, query, events, runID); err != nil {
+	if _, err := adapter.investigate(ctx, query, priorContext, events, runID); err != nil {
 		adapter.emitFailure(ctx, events, runID, err)
 	}
 }

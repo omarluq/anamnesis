@@ -15,8 +15,7 @@ import (
 
 	"github.com/mvm-sh/mvm/interp"
 	"github.com/mvm-sh/mvm/lang/golang"
-	"github.com/mvm-sh/mvm/stdlib"
-	_ "github.com/mvm-sh/mvm/stdlib/all" // populates stdlib.Values with Go's standard library bindings.
+	_ "github.com/mvm-sh/mvm/stdlib/all" // populates stdlib.Values, which allowedStdlibValues filters.
 	"github.com/samber/oops"
 )
 
@@ -26,7 +25,9 @@ import (
 // single source of truth across the repl boundary.
 const CodeEvalTimedOut = "eval_timed_out"
 
-// Interpreter wraps an mvm interpreter preloaded with the Go standard library.
+// Interpreter wraps an mvm interpreter preloaded with the allow-listed subset of
+// the Go standard library (see allowlist.go; host-effect packages such as os and
+// net are withheld so interpreted source stays sandboxed).
 // Each Eval runs a named source fragment against the shared session state and
 // captures its output into per-turn buffers. The zero value is not usable;
 // construct one with NewInterpreter.
@@ -78,14 +79,19 @@ type evalOutcome struct {
 	value reflect.Value
 }
 
-// NewInterpreter returns an Interpreter whose mvm engine has the Go standard
-// library imported and its packages auto-resolved, ready to evaluate controller
-// source. Its SetIO is wired to the per-turn buffers so interpreted fmt.Print
-// output is captured rather than written to the host process. State established
-// by one Eval persists into later Eval calls.
+// NewInterpreter returns an Interpreter whose mvm engine has the allow-listed
+// subset of the Go standard library imported and its packages auto-resolved,
+// ready to evaluate controller source. It imports only safeStdlibPackages rather
+// than the whole stdlib.Values bridge, so interpreted source can reach fmt and
+// its peers but never os/os-exec/syscall/net and the other host-effect packages
+// whose bridge bindings would otherwise grant the controller's raw Go arbitrary
+// host access — see allowlist.go for the security rationale. Its SetIO is wired
+// to the per-turn buffers so interpreted fmt.Print output is captured rather than
+// written to the host process. State established by one Eval persists into later
+// Eval calls.
 func NewInterpreter() *Interpreter {
 	engine := interp.NewInterpreter(golang.GoSpec)
-	engine.ImportPackageValues(stdlib.Values)
+	engine.ImportPackageValues(allowedStdlibValues())
 	engine.AutoImportPackages()
 
 	interpreter := &Interpreter{

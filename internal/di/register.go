@@ -14,11 +14,11 @@ import (
 // RegisterServices registers all application services in the injector. Every host
 // collaborator investigationDeps resolves per submit is wired here, so the full
 // set assembles rather than failing at the first unregistered seam: the OpenAI
-// client backs the three RLM model adapters — rlm.ControllerLLM, rlm.SubLLM, and
-// rlm.Judger — and the journal and systemd read surfaces back repl.Journal and
-// repl.Systemd. Every registration is lazy, so the container assembles and all
-// five collaborators resolve with no live OpenAI call, no journal or bus access,
-// and no API key present.
+// client backs the two RLM model adapters — rlm.ControllerLLM and rlm.SubLLM — and
+// the journal and systemd read surfaces back repl.Journal and repl.Systemd. Every
+// registration is lazy, so the container assembles and all four collaborators
+// resolve with no live OpenAI call, no journal or bus access, and no API key
+// present.
 func RegisterServices(injector do.Injector) {
 	do.Provide(injector, NewConfigService)
 	do.Provide(injector, NewLoggerService)
@@ -26,7 +26,6 @@ func RegisterServices(injector do.Injector) {
 	do.Provide(injector, newOpenAIClient)
 	do.Provide(injector, newControllerAdapter)
 	do.Provide(injector, newSubAdapter)
-	do.Provide(injector, newJudgeAdapter)
 	do.Provide(injector, newJournalSurface)
 	do.Provide(injector, newSystemdSurface)
 }
@@ -49,22 +48,26 @@ func NewChatController(injector do.Injector) (terminal.Controller, error) {
 // tagged with the di domain when a collaborator is not yet registered, which the
 // adapter renders to the shell as a failed run.
 func investigateWith(injector do.Injector) terminal.Investigator {
-	return func(ctx context.Context, query string, events chan<- terminal.TraceEvent, runID uint64) (string, error) {
+	return func(
+		ctx context.Context,
+		query, priorContext string,
+		events chan<- terminal.TraceEvent,
+		runID uint64,
+	) (string, error) {
 		deps, err := investigationDeps(injector, events, runID)
 		if err != nil {
 			return "", err
 		}
 
-		return rlm.Investigate(ctx, query, deps)
+		return rlm.Investigate(ctx, query, priorContext, deps)
 	}
 }
 
 // investigationDeps resolves the host collaborators one investigation is wired
-// from — the controller, sub-LLM and judge model seams plus the journal and
-// systemd read surfaces — and bundles them with the run's trace channel and ID
-// into the rlm.Deps the controller spine consumes. It returns an oops error
-// tagged with the di domain identifying the first collaborator that is not yet
-// registered.
+// from — the controller and sub-LLM model seams plus the journal and systemd read
+// surfaces — and bundles them with the run's trace channel and ID into the rlm.Deps
+// the controller spine consumes. It returns an oops error tagged with the di domain
+// identifying the first collaborator that is not yet registered.
 func investigationDeps(
 	injector do.Injector,
 	events chan<- terminal.TraceEvent,
@@ -80,11 +83,6 @@ func investigationDeps(
 		return nil, collaboratorError(err, "sub-LLM")
 	}
 
-	judge, err := do.Invoke[rlm.Judger](injector)
-	if err != nil {
-		return nil, collaboratorError(err, "judge")
-	}
-
 	journalSurface, err := do.Invoke[repl.Journal](injector)
 	if err != nil {
 		return nil, collaboratorError(err, "journal")
@@ -98,7 +96,6 @@ func investigationDeps(
 	return &rlm.Deps{
 		Controller:  controller,
 		Sub:         sub,
-		Judge:       judge,
 		Journal:     journalSurface,
 		Systemd:     systemdSurface,
 		Events:      events,

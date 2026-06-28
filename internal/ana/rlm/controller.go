@@ -10,7 +10,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/samber/lo"
 	"github.com/samber/mo"
 	"github.com/samber/oops"
 
@@ -46,11 +45,6 @@ const (
 	finishEvalTimeout forceFinishReason = "eval_timeout"
 )
 
-// critiqueHeader labels the judge's critique where the loop appends it to the
-// controller transcript on a §5 retry turn, so the controller can tell the audit's
-// revision directive apart from its own turn output.
-const critiqueHeader = "JUDGE CRITIQUE (revise the final answer and call agent.FINAL again): "
-
 // EvalCapture is the interpreter seam the controller loop drives each turn:
 // EvalContext runs the turn's generated Go against the persistent REPL session
 // under a timeout and captures what it printed, and Final resolves the terminal
@@ -80,9 +74,8 @@ var _ EvalCapture = (*repl.Interpreter)(nil)
 // controller model for the next ControllerResponse, evaluates the generated Go
 // through the interpreter, records the turn into the session history, and emits a
 // trace event; once the model reports Done, Run resolves the answer the controller
-// signaled through agent.FINAL or agent.FINAL_VAR. RunAudited layers the §5
-// post-FINAL judge gate on top — rejecting a fabricated citation and asking the
-// judge to review, with one revision retry. It is built from one Session and one
+// signaled through agent.FINAL or agent.FINAL_VAR, enforcing the §7/§10 citation
+// grounding gate before returning it. It is built from one Session and one
 // EvalCapture with NewController; the zero value is not usable because both
 // collaborators must be wired first.
 type Controller struct {
@@ -91,10 +84,6 @@ type Controller struct {
 	session *Session
 	// eval runs each turn's generated Go and resolves the terminal answer.
 	eval EvalCapture
-	// critique holds the judge's critique once the audit has spent its single §5
-	// retry: the loop surfaces it to the controller on the retry turn, and its
-	// presence marks the retry as spent so a second critique renders the answer.
-	critique string
 	// finished records how the loop settled — finishFinal for a model-signaled
 	// agent.FINAL, or the force-finish cause — so the run-end observability summary
 	// can tell a clean finish from a force-finish. It is set as the loop returns.
@@ -106,7 +95,7 @@ type Controller struct {
 // evaluates each turn's code through eval, appends to session.History, and emits
 // onto session.Emitter.
 func NewController(session *Session, eval EvalCapture) *Controller {
-	return &Controller{session: session, eval: eval, critique: "", finished: finishContinue}
+	return &Controller{session: session, eval: eval, finished: finishContinue}
 }
 
 // Run executes the controller turn loop until the model reports Done, returning
@@ -119,14 +108,14 @@ func NewController(session *Session, eval EvalCapture) *Controller {
 // onto the turn's Err field rather than unwinding the loop — appends a
 // ControllerTurn to the session history, and emits a turn trace event; the final
 // turn resolves the answer the controller signaled through agent.FINAL (a literal)
-// or agent.FINAL_VAR (the interpreter-resolved value of a named REPL variable). It
-// returns an error when a controller call fails or when the model reports Done
-// without a resolvable answer. A turn whose eval times out — a non-terminating loop
+// or agent.FINAL_VAR (the interpreter-resolved value of a named REPL variable),
+// enforcing the §7/§10 citation grounding gate before returning it so a fabricated
+// citation fails the run. It returns an error when a controller call fails, when the
+// model reports Done without a resolvable answer, or when a cited cursor was never
+// made visible this session. A turn whose eval times out — a non-terminating loop
 // the interpreter cannot preempt — force-finishes the loop too: its abandoned
 // goroutine poisons the interpreter, so the loop force-finishes with that honest
-// note rather than taking another turn against a poisoned session. Run drives the §6
-// loop only;
-// RunAudited layers the §5 judge gate on top.
+// note rather than taking another turn against a poisoned session.
 func (controller *Controller) Run(ctx context.Context) (string, error) {
 	for {
 		select {
@@ -141,9 +130,7 @@ func (controller *Controller) Run(ctx context.Context) (string, error) {
 		}
 
 		if response.Done {
-			controller.finished = finishFinal
-
-			return controller.resolve()
+			return controller.resolveDone(ctx, response)
 		}
 
 		if controller.recordTurn(ctx, response) {
@@ -152,98 +139,29 @@ func (controller *Controller) Run(ctx context.Context) (string, error) {
 	}
 }
 
-// RunAudited runs one investigation under the §5 judge gate: it drives the §6 turn
-// loop to a resolved answer, rejects a fabricated citation, and asks the §16 judge
-// to review. An approving judge — or a critique that arrives after the single retry
-// is already spent — renders the answer, while a first critique is recorded for the
-// controller and the loop runs once more so the controller can revise against it,
-// seeing that critique surfaced in its framed history. The shared session budget
-// caps the revision, so the gate settles after at most one extra pass.
-//
-// Only a model-signaled agent.FINAL is audited, and a grounded FINAL is never
-// downgraded. A force-finished pass — the caller canceling ctx (the user quits) or a
-// turn's eval idling out its per-eval progress watchdog — yields an honest
-// "investigation incomplete" note, not a grounded conclusion. So the loop remembers
-// the last grounded FINAL: if a later pass force-finishes, RunAudited renders that
-// remembered FINAL rather than replacing it with the incomplete note; only when no
-// pass ever finalized is the note itself the honest result. This keeps the judge off a
-// non-answer and keeps a critique-then-force-finish from silently erasing a sound
-// answer. It returns an error when the loop fails, a cited cursor was never made
-// visible, or the judge call fails.
-func (controller *Controller) RunAudited(ctx context.Context) (string, error) {
-	var (
-		lastFinal string
-		finalized bool
-	)
-
-	for {
-		answer, err := controller.Run(ctx)
-		if err != nil {
-			return "", err
-		}
-
-		// A force-finished pass is a non-answer: render the last grounded FINAL if one was
-		// reached, else the honest note. Either way the judge and the revision are skipped.
-		if controller.finished != finishFinal {
-			if finalized {
-				return lastFinal, nil
-			}
-
-			return answer, nil
-		}
-
-		lastFinal, finalized = answer, true
-
-		// The caller canceled ctx after this FINAL resolved: auditing on a dead context
-		// would only fail the judge with a cancellation error, so render the resolved
-		// answer rather than turning the cancel into an error.
-		select {
-		case <-ctx.Done():
-			return answer, nil
-		default:
-		}
-
-		settled, err := controller.reviewed(ctx, answer)
-		if err != nil {
-			return "", err
-		}
-
-		if settled {
-			return answer, nil
-		}
-	}
-}
-
 // FinishReason reports how the loop settled — "final" for a model-signaled
 // agent.FINAL, or the force-finish cause — for the run-end observability summary. It
-// is meaningful only after Run or RunAudited has returned.
+// is meaningful only after Run has returned.
 func (controller *Controller) FinishReason() string {
 	return string(controller.finished)
 }
 
-// reviewed runs the post-FINAL §5 gate over a resolved answer and reports whether
-// the run is settled. It rejects a fabricated citation, asks the §16 judge to
-// review, and decides: an approving judge — or a critique arriving after the single
-// retry is already spent — settles the run so the answer renders, while a first
-// critique is recorded so the next loop surfaces it and leaves the run unsettled. It
-// returns an oops error when a citation is fabricated or the judge call fails.
-func (controller *Controller) reviewed(ctx context.Context, answer string) (bool, error) {
-	if err := controller.validateCitations(); err != nil {
-		return false, err
+// resolveDone settles a turn the model marked Done: it records the loop as final,
+// evaluates the turn's code when it carries any — some models inline the agent.FINAL
+// call on the Done turn rather than the prior turn — and resolves the terminal
+// answer. A clean Done turn carries no code, so the eval is skipped and resolve reads
+// the answer a prior turn's agent.FINAL recorded. It returns the force-finish note
+// when that inline eval times out.
+func (controller *Controller) resolveDone(ctx context.Context, response openai.ControllerResponse) (string, error) {
+	controller.finished = finishFinal
+
+	if strings.TrimSpace(response.Code) != "" {
+		if controller.recordTurn(ctx, response) {
+			return controller.forceFinish(finishEvalTimeout), nil
+		}
 	}
 
-	critique, err := controller.judge(ctx, answer)
-	if err != nil {
-		return false, err
-	}
-
-	if critique == "" || controller.retrySpent() {
-		return true, nil
-	}
-
-	controller.recordCritique(critique)
-
-	return false, nil
+	return controller.resolve()
 }
 
 // validateCitations enforces the §7/§10 grounding guarantee before the answer can
@@ -259,49 +177,6 @@ func (controller *Controller) validateCitations() error {
 	}
 
 	return nil
-}
-
-// judge runs the one-shot §16 audit pass over the resolved answer, framing the
-// original question and the rendered investigation transcript as the grounding the
-// judge weighs its verdict against. It brackets the call with the emitter's judge
-// lifecycle so the transcript renders a judge block: JudgeStart before the call,
-// and JudgeEnd carrying the critique after a successful one. A failed call surfaces
-// the error and emits no JudgeEnd, leaving the run to report the fault rather than
-// settling a verdict that never came. It returns the judge's critique — empty on
-// approval — wrapping a judge-call failure as an oops error in the rlm domain.
-func (controller *Controller) judge(ctx context.Context, answer string) (string, error) {
-	controller.session.Emitter.JudgeStart(answer)
-
-	critique, err := controller.session.Judge.Judge(
-		ctx,
-		controller.session.Question,
-		answer,
-		Render(controller.session.History),
-	)
-	if err != nil {
-		return "", oops.
-			In("rlm").
-			Code("controller_judge_failed").
-			Wrapf(err, "judge final answer")
-	}
-
-	controller.session.Emitter.JudgeEnd(critique)
-
-	return critique, nil
-}
-
-// recordCritique stores the judge's critique so the next controller turn sees it as
-// a revision directive in its framed history, and — because a non-empty critique
-// marks the single §5 retry as spent — guarantees a later critique renders the
-// answer instead of looping again.
-func (controller *Controller) recordCritique(critique string) {
-	controller.critique = critique
-}
-
-// retrySpent reports whether the audit has already issued its single §5 judge
-// retry, which it tracks by the presence of a recorded critique.
-func (controller *Controller) retrySpent() bool {
-	return controller.critique != ""
 }
 
 // forceFinish assembles the §6 force-finish answer the loop renders when it stops for
@@ -343,11 +218,11 @@ func (controller *Controller) forceFinishNote() string {
 	)
 }
 
-// respond renders the framed history so far and asks the controller model for the
+// respond renders the transcript so far and asks the controller model for the
 // next turn, wrapping a model-call failure as an oops error tagged with the rlm
 // domain.
 func (controller *Controller) respond(ctx context.Context) (openai.ControllerResponse, error) {
-	history := controller.framedHistory()
+	history := Render(controller.session.History)
 
 	response, err := controller.session.Controller.Respond(
 		ctx,
@@ -366,31 +241,6 @@ func (controller *Controller) respond(ctx context.Context) (openai.ControllerRes
 	return response, nil
 }
 
-// framedHistory renders the §6 transcript the controller is shown for its next
-// turn: the recorded turns, followed by the judge's critique as a distinct revision
-// directive once the audit has spent its single retry, so the controller revises
-// the answer against that feedback rather than re-deriving it blind. With no
-// recorded critique it is exactly the rendered history.
-func (controller *Controller) framedHistory() string {
-	sections := lo.Filter(
-		[]string{Render(controller.session.History), controller.critiqueDirective()},
-		func(section string, _ int) bool { return section != "" },
-	)
-
-	return strings.Join(sections, "\n")
-}
-
-// critiqueDirective renders the recorded judge critique as the labeled revision
-// directive the controller sees on its retry turn, or the empty string when the
-// judge has not critiqued so framedHistory can omit it cleanly.
-func (controller *Controller) critiqueDirective() string {
-	if controller.critique == "" {
-		return ""
-	}
-
-	return critiqueHeader + controller.critique
-}
-
 // recordTurn streams the turn's reasoning and code to the transcript, evaluates the
 // turn's generated Go under the per-eval timeout, and appends the resulting
 // ControllerTurn to the session history, reporting whether the eval timed out — the
@@ -398,9 +248,8 @@ func (controller *Controller) critiqueDirective() string {
 // thinking, then the code block opening, then (after evaluation) the code block's
 // captured output — so a turn that fans out via agent.Query shows its sub-call
 // blocks nested between the code's start and its settled output. The turn index is
-// the current history length, so it stays unique and monotonic even when RunAudited
-// re-enters Run for a §5 revision pass against a history that already holds the
-// earlier turns. An ordinary evaluation fault — including a recovered over-budget
+// the current history length, so it stays unique and monotonic as the loop appends
+// each turn. An ordinary evaluation fault — including a recovered over-budget
 // agent.Query panic — is recorded on the turn and tolerated, so the controller sees
 // the error on its next turn and can recover; an eval_timed_out is different: it
 // abandoned a goroutine that poisons the interpreter, so recordTurn reports true and
@@ -512,7 +361,10 @@ func evalTimedOut(err error) bool {
 }
 
 // resolve reads the terminal answer the interpreter holds once the model reports
-// Done, returning an oops error when no terminal primitive resolved an answer.
+// Done and enforces the §7/§10 citation grounding gate before returning it: a run
+// that cited a cursor no journal query made visible this session fails here rather
+// than rendering a fabricated answer. It returns an oops error when no terminal
+// primitive resolved an answer, or when validateCitations rejects the citations.
 func (controller *Controller) resolve() (string, error) {
 	answer, ok := controller.eval.Final()
 	if !ok {
@@ -520,6 +372,10 @@ func (controller *Controller) resolve() (string, error) {
 			In("rlm").
 			Code("controller_missing_final").
 			Errorf("controller reported done without a terminal answer")
+	}
+
+	if err := controller.validateCitations(); err != nil {
+		return "", err
 	}
 
 	return answer, nil

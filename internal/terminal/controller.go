@@ -16,6 +16,8 @@ import "context"
 type Controller interface {
 	// Start begins a run for query, tags every emitted event with runID, and
 	// returns the channel the shell loop drains until the implementation closes
-	// it.
-	Start(ctx context.Context, query string, runID uint64) <-chan TraceEvent
+	// it. priorContext is the prior-conversation preamble (earlier questions and
+	// answers in this session) the run folds ahead of query so a follow-up resolves
+	// against earlier answers; it is empty for the first question of a session.
+	Start(ctx context.Context, query, priorContext string, runID uint64) <-chan TraceEvent
 }

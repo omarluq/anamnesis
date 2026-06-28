@@ -363,7 +363,6 @@ func (r *recursor) childSession(store *citations.Store, prompt, evidence string)
 	return &Session{
 		Controller:   r.deps.Controller,
 		Sub:          r.deps.Sub,
-		Judge:        r.deps.Judge,
 		Budget:       budget,
 		Store:        store,
 		Emitter:      r.emitter,

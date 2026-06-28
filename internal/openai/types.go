@@ -7,8 +7,8 @@ import (
 	"github.com/samber/oops"
 )
 
-// Model is the OpenAI model id every role runs on — controller, sub-LLM, and
-// judge. It is a raw string because the SDK ships no constant for gpt-5.5. There
+// Model is the OpenAI model id every role runs on — controller and sub-LLM. It
+// is a raw string because the SDK ships no constant for gpt-5.5. There
 // is deliberately no fallback: if the supplied key lacks gpt-5.5 access the run
 // fails loudly rather than silently downgrading to a weaker model.
 const Model = "gpt-5.5"

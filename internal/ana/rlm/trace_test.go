@@ -86,38 +86,6 @@ func TestEmitterCarriesQueryDepth(t *testing.T) {
 	assert.Equal(t, uint64(1), got[3].QueryID, "the outer end carries the outer start's id")
 }
 
-// TestEmitterJudgeLifecycle proves the judge lifecycle methods emit the §16 judge
-// kinds at depth 0 with a zero QueryID: JudgeStart carries the answer under review
-// and JudgeEnd carries the critique (empty on approval).
-func TestEmitterJudgeLifecycle(t *testing.T) {
-	t.Parallel()
-
-	const runID = uint64(13)
-
-	events := make(chan terminal.TraceEvent, 2)
-	emitter := rlm.NewEmitter(context.Background(), events, runID)
-
-	emitter.JudgeStart("the resolved answer")
-	emitter.JudgeEnd("cite the originating boot")
-	close(events)
-
-	got := make([]terminal.TraceEvent, 0, 2)
-	for event := range events {
-		got = append(got, event)
-	}
-
-	require.Len(t, got, 2)
-	assert.Equal(t, terminal.TraceKindJudgeStart, got[0].Kind)
-	assert.Equal(t, "the resolved answer", got[0].Text)
-	assert.Equal(t, 0, got[0].Depth)
-	assert.Equal(t, uint64(0), got[0].QueryID, "a judge event carries no query-correlation id")
-	assert.Equal(t, terminal.TraceKindJudgeEnd, got[1].Kind)
-	assert.Equal(t, "cite the originating boot", got[1].Text)
-	assert.Equal(t, runID, got[1].RunID)
-	assert.Equal(t, 0, got[1].Depth)
-	assert.Equal(t, uint64(0), got[1].QueryID, "a judge event carries no query-correlation id")
-}
-
 // TestEmitterAbandonsBlockedSendOnCancel exercises the cancel-safe send path: a
 // send that blocks on an undrained trace channel must return once the run context
 // is canceled, so a stalled UI consumer (or a canceled run) unblocks the emitter

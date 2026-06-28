@@ -92,7 +92,7 @@ func TestComposerSubmitDrivesControllerRunThroughLoop(t *testing.T) {
 
 	screen := newFakeScreen(80, 24)
 	ctrl := new(mockController)
-	ctrl.On("Start", mock.Anything, query, uint64(1)).
+	ctrl.On("Start", mock.Anything, query, mock.Anything, uint64(1)).
 		Return(scriptedTrace(1,
 			traceEvent(TraceKindThinking, "investigating", 0),
 			traceEvent(TraceKindFinal, "all clear", 0),
@@ -109,7 +109,7 @@ func TestComposerSubmitDrivesControllerRunThroughLoop(t *testing.T) {
 	require.NoError(t, awaitLoop(t, done))
 
 	ctrl.AssertExpectations(t)
-	ctrl.AssertCalled(t, "Start", mock.Anything, query, uint64(1))
+	ctrl.AssertCalled(t, "Start", mock.Anything, query, mock.Anything, uint64(1))
 	assert.Equal(t, uint64(1), app.runID, "submitting starts run #1")
 	assert.True(t, app.composer.Empty(), "the composer clears once the query is submitted")
 	assert.Equal(t,

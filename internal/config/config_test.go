@@ -26,7 +26,7 @@ const (
 
 // validReasoning is a reasoning block every passing Validate case can reuse so each
 // case exercises one field at a time, mirroring the loader defaults.
-var validReasoning = config.ReasoningConfig{Controller: effortMedium, Sub: effortLow, Judge: effortMedium}
+var validReasoning = config.ReasoningConfig{Controller: effortMedium, Sub: effortLow}
 
 // configValidateCase is one Validate table row: a Config built from the field
 // values plus the error substring and oops code Validate is expected to produce
@@ -55,7 +55,7 @@ func configValidateCases() []configValidateCase {
 		{
 			name: "mixed-case reasoning", appName: appName, env: envDev,
 			level: levelInfo, format: formatPretty,
-			reasoning: config.ReasoningConfig{Controller: "MEDIUM", Sub: "Low", Judge: "XHigh"},
+			reasoning: config.ReasoningConfig{Controller: "MEDIUM", Sub: "Low"},
 			errMsg:    "", wantCode: "",
 		},
 		{
@@ -81,20 +81,14 @@ func configValidateCases() []configValidateCase {
 		{
 			name: "bad reasoning controller", appName: appName, env: envDev,
 			level: levelInfo, format: formatPretty,
-			reasoning: config.ReasoningConfig{Controller: "extreme", Sub: effortLow, Judge: effortMedium},
+			reasoning: config.ReasoningConfig{Controller: "extreme", Sub: effortLow},
 			errMsg:    "reasoning.controller", wantCode: codeInvalidEffort,
 		},
 		{
 			name: "bad reasoning sub", appName: appName, env: envDev,
 			level: levelInfo, format: formatPretty,
-			reasoning: config.ReasoningConfig{Controller: effortMedium, Sub: "fast", Judge: effortMedium},
+			reasoning: config.ReasoningConfig{Controller: effortMedium, Sub: "fast"},
 			errMsg:    "reasoning.sub", wantCode: codeInvalidEffort,
-		},
-		{
-			name: "bad reasoning judge", appName: appName, env: envDev,
-			level: levelInfo, format: formatPretty,
-			reasoning: config.ReasoningConfig{Controller: effortMedium, Sub: effortLow, Judge: "ultra"},
-			errMsg:    "reasoning.judge", wantCode: codeInvalidEffort,
 		},
 	}
 }
@@ -151,7 +145,6 @@ logging:
 reasoning:
   controller: high
   sub: minimal
-  judge: xhigh
 `
 
 	cfg, err := config.Load(writeConfig(t, content)).Get()
@@ -159,7 +152,7 @@ reasoning:
 	assert.Equal(t, config.Config{
 		App:       config.AppConfig{Name: "testapp", Env: envProd},
 		Logging:   config.LoggingConfig{Level: "warn", Format: "json", File: ""},
-		Reasoning: config.ReasoningConfig{Controller: "high", Sub: "minimal", Judge: "xhigh"},
+		Reasoning: config.ReasoningConfig{Controller: "high", Sub: "minimal"},
 	}, *cfg)
 }
 
@@ -173,7 +166,7 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	assert.Equal(t, config.Config{
 		App:       config.AppConfig{Name: "customapp", Env: envDev},
 		Logging:   config.LoggingConfig{Level: levelInfo, Format: formatPretty, File: ""},
-		Reasoning: config.ReasoningConfig{Controller: effortMedium, Sub: effortLow, Judge: effortMedium},
+		Reasoning: config.ReasoningConfig{Controller: effortMedium, Sub: effortLow},
 	}, *cfg)
 }
 

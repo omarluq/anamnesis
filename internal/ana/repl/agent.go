@@ -98,10 +98,28 @@ func (agent *Agent) recordFinalVar(varname string) {
 	agent.kind = finalVariable
 }
 
-// cite backs agent.Cite: it forwards entries to the citation sink, which
-// accumulates them as evidence for the final answer.
-func (agent *Agent) cite(entries []journal.Entry) {
-	agent.sink.Cite(entries)
+// cite backs agent.Cite. It is variadic and type-tolerant on purpose: the
+// controller model frequently calls agent.Cite with a leading label string
+// (agent.Cite("failed_units", entries)) or hands it a value that carries no citable
+// cursor (a systemd.UnitStatus). A strict one-argument []journal.Entry signature
+// panics on both, and because a panic aborts the whole code block it would also skip
+// any agent.FINAL that follows in the same block — surfacing to the user as a
+// spurious "done without a terminal answer" failure. So cite forwards every
+// []journal.Entry among its arguments to the sink and ignores the rest, never
+// panicking, so a malformed Cite degrades to citing nothing instead of failing the
+// turn.
+func (agent *Agent) cite(args ...any) {
+	var entries []journal.Entry
+
+	for _, arg := range args {
+		if cited, ok := arg.([]journal.Entry); ok {
+			entries = append(entries, cited...)
+		}
+	}
+
+	if len(entries) > 0 {
+		agent.sink.Cite(entries)
+	}
 }
 
 // resolve returns the terminal answer and true once a terminal primitive has

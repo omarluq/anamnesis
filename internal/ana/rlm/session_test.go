@@ -67,25 +67,10 @@ func (m *mockSubLLM) Answer(ctx context.Context, prompt, evidence string) (strin
 	return args.String(0), args.Error(1)
 }
 
-// mockJudger is a testify mock of the Judger seam standing in for the openai
-// judge layer.
-type mockJudger struct {
-	mock.Mock
-}
-
-// Judge records its arguments and replays the critique scripted via
-// .On("Judge", ...).Return(critique, err).
-func (m *mockJudger) Judge(ctx context.Context, question, answer, cited string) (string, error) {
-	args := m.Called(ctx, question, answer, cited)
-
-	return args.String(0), args.Error(1)
-}
-
 // Compile-time assertions that every mock satisfies the rlm seam it stands in for.
 var (
 	_ rlm.ControllerLLM = (*mockControllerLLM)(nil)
 	_ rlm.SubLLM        = (*mockSubLLM)(nil)
-	_ rlm.Judger        = (*mockJudger)(nil)
 )
 
 // sessionFixture bundles a wired Session with handles on the collaborators and
@@ -93,7 +78,6 @@ var (
 type sessionFixture struct {
 	controller *mockControllerLLM
 	sub        *mockSubLLM
-	judge      *mockJudger
 	budget     *rlm.Budget
 	store      *citations.Store
 	emitter    *rlm.Emitter
@@ -107,7 +91,6 @@ type sessionFixture struct {
 func newSessionFixture() *sessionFixture {
 	controller := new(mockControllerLLM)
 	sub := new(mockSubLLM)
-	judge := new(mockJudger)
 	budget := rlm.NewBudget()
 	store := citations.NewStore()
 	// Sized so a short controller run — each turn emits a thinking event plus a
@@ -119,7 +102,6 @@ func newSessionFixture() *sessionFixture {
 	return &sessionFixture{
 		controller: controller,
 		sub:        sub,
-		judge:      judge,
 		budget:     budget,
 		store:      store,
 		emitter:    emitter,
@@ -127,7 +109,6 @@ func newSessionFixture() *sessionFixture {
 		session: rlm.Session{
 			Controller:   controller,
 			Sub:          sub,
-			Judge:        judge,
 			Budget:       budget,
 			Store:        store,
 			Emitter:      emitter,
@@ -146,7 +127,6 @@ func TestSessionWiresBudgetStoreEmitter(t *testing.T) {
 
 	assert.Same(t, fixture.controller, session.Controller)
 	assert.Same(t, fixture.sub, session.Sub)
-	assert.Same(t, fixture.judge, session.Judge)
 	assert.Same(t, fixture.budget, session.Budget)
 	assert.Same(t, fixture.store, session.Store)
 	assert.Same(t, fixture.emitter, session.Emitter)
@@ -202,9 +182,6 @@ func TestSessionDrivesModelCollaborators(t *testing.T) {
 	fixture.sub.On("Answer", ctx, "summarize", "[]Entry").
 		Return("3 boots", nil).
 		Once()
-	fixture.judge.On("Judge", ctx, fixtureQuestion, "final answer", "cur-oom").
-		Return("", nil).
-		Once()
 
 	resp, err := fixture.session.Controller.Respond(ctx, fixtureSystemPrompt, fixtureQuestion, "history", nil)
 	require.NoError(t, err)
@@ -214,11 +191,6 @@ func TestSessionDrivesModelCollaborators(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "3 boots", answer)
 
-	critique, err := fixture.session.Judge.Judge(ctx, fixtureQuestion, "final answer", "cur-oom")
-	require.NoError(t, err)
-	assert.Empty(t, critique)
-
 	fixture.controller.AssertExpectations(t)
 	fixture.sub.AssertExpectations(t)
-	fixture.judge.AssertExpectations(t)
 }

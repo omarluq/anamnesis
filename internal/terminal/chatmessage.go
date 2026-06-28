@@ -12,14 +12,6 @@ const (
 	welcomeText = "Type a message and press Enter to begin."
 	// queryName labels every recursive sub-call block as the agent.Query primitive.
 	queryName = "agent.Query"
-	// judgeName labels the §16 judge-pass block as the agent.Judge gate.
-	judgeName = "agent.Judge"
-	// judgeArgs is the fixed args line shown on a judge block while the §16 gate
-	// reviews the resolved answer against its cited evidence.
-	judgeArgs = "reviewing answer against citations"
-	// judgeApprovedOutput is the output a judge block settles to when the §16 gate
-	// approves the answer (an empty critique); a non-empty critique replaces it.
-	judgeApprovedOutput = "approved — every claim is grounded in a cited entry"
 	// codeName labels every per-turn code-evaluation block as the Go the controller
 	// ran in the embedded interpreter.
 	codeName = "code"
@@ -77,6 +69,82 @@ func (app *App) appendAssistant(markdown string) {
 	}
 
 	app.history = append(app.history, newChatMessage(transcript.RoleAssistant, trimmed))
+}
+
+// maxPriorExchanges caps how many recent question/answer pairs the follow-up
+// preamble carries, and maxPriorAnswerRunes truncates each prior answer, so a long
+// session can never grow the preamble without bound.
+const (
+	maxPriorExchanges   = 6
+	maxPriorAnswerRunes = 800
+)
+
+// priorExchange is one completed question/answer pair from earlier in the session.
+type priorExchange struct {
+	question string
+	answer   string
+}
+
+// priorConversation renders the completed question/answer pairs in history as a
+// short "Earlier in this session" preamble the next investigation folds ahead of
+// its question, so a follow-up can resolve a reference like "that ssh issue"
+// without the run carrying any interpreter or transcript state forward. It pairs
+// each user message with the assistant answer that follows it, keeps only the last
+// maxPriorExchanges pairs, truncates each answer to maxPriorAnswerRunes on a rune
+// boundary, and returns the empty string when no exchange has completed yet — the
+// first question of a session, or one still in flight. Only distilled answers cross
+// forward, never the raw per-turn REPL output the loop keeps out of context.
+func priorConversation(history []chatMessage) string {
+	var (
+		exchanges       []priorExchange
+		pendingQuestion string
+		havePending     bool
+	)
+
+	for _, message := range history {
+		switch {
+		case message.Role == transcript.RoleUser:
+			pendingQuestion = message.Content
+			havePending = true
+		case message.Role == transcript.RoleAssistant && havePending:
+			exchanges = append(exchanges, priorExchange{question: pendingQuestion, answer: message.Content})
+			havePending = false
+		}
+	}
+
+	if len(exchanges) == 0 {
+		return ""
+	}
+
+	if len(exchanges) > maxPriorExchanges {
+		exchanges = exchanges[len(exchanges)-maxPriorExchanges:]
+	}
+
+	var builder strings.Builder
+
+	builder.WriteString("Earlier in this session:\n")
+
+	for _, exchange := range exchanges {
+		builder.WriteString("\nQ: ")
+		builder.WriteString(exchange.question)
+		builder.WriteString("\nA: ")
+		builder.WriteString(truncateRunes(exchange.answer, maxPriorAnswerRunes))
+		builder.WriteString("\n")
+	}
+
+	return builder.String()
+}
+
+// truncateRunes returns text unchanged when it fits within limit runes, else its
+// first limit runes with an ellipsis, cutting on a rune boundary so a multi-byte
+// character is never split.
+func truncateRunes(text string, limit int) string {
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+
+	return string(runes[:limit]) + "…"
 }
 
 // appendThinking appends a reasoning turn as a thinking message, ignoring blank
@@ -174,15 +242,9 @@ func queryContent(prompt, result string) string {
 	return toolEventContent(queryName, prompt, result)
 }
 
-// judgeContent renders a judge block's args and verdict through the same tool-event
-// wire format as a query block, labeled as the agent.Judge gate.
-func judgeContent(args, result string) string {
-	return toolEventContent(judgeName, args, result)
-}
-
 // toolEventContent renders a named tool block's args and result into the
-// transcript's tool-event wire format, the shared formatter query and judge blocks
-// both round-trip through so the on-screen block and any persisted transcript stay
+// transcript's tool-event wire format, the shared formatter query blocks
+// round-trip through so the on-screen block and any persisted transcript stay
 // in lockstep.
 func toolEventContent(name, args, result string) string {
 	return transcript.FormatToolEventDisplay(&transcript.ToolEvent{
@@ -230,53 +292,6 @@ func (app *App) completeCode(output, errText string) {
 	}
 }
 
-// appendJudgeStart opens a pending judge block for the §16 gate reviewing answer.
-// The block sits at depth 0 with a fixed args line; completeJudge later settles it
-// with the verdict. The answer under review frames the gate but is not itself shown
-// in the block, which previews the review action rather than the full answer text.
-func (app *App) appendJudgeStart(_ string) {
-	app.history = append(app.history, chatMessage{
-		Role:    transcript.RoleToolResult,
-		Content: judgeContent(judgeArgs, ""),
-		Args:    judgeArgs,
-		QueryID: 0,
-		Pending: true,
-	})
-}
-
-// completeJudge settles the most recent pending judge block with the gate's verdict:
-// the standing approved line when critique is empty, or the critique text when the
-// gate asks for a revision. A JudgeEnd with no open judge block is ignored so a
-// stray end cannot corrupt the transcript. Judge blocks carry no QueryID — there is
-// at most one pending at a time — so the most-recent pending agent.Judge block is
-// the match.
-func (app *App) completeJudge(critique string) {
-	output := judgeApprovedOutput
-	if critique != "" {
-		output = critique
-	}
-
-	for index, message := range slices.Backward(app.history) {
-		if !message.Pending || message.Role != transcript.RoleToolResult {
-			continue
-		}
-
-		if parseQueryContent(message.Content).Name != judgeName {
-			continue
-		}
-
-		app.history[index] = chatMessage{
-			Role:    transcript.RoleToolResult,
-			Content: judgeContent(judgeArgs, output),
-			Args:    judgeArgs,
-			QueryID: 0,
-			Pending: false,
-		}
-
-		return
-	}
-}
-
 // settlePending finalizes every block still marked pending when a run ends. A
 // force-finish — the §6 soft deadline, the wall-clock timeout, or an eval timeout —
 // cancels the run while a code or agent.Query block is in flight, so its CodeEnd or
@@ -294,8 +309,8 @@ func (app *App) settlePending() {
 }
 
 // settleInterrupted returns message settled with the interrupted note: a code block and
-// a query block re-render from their raw Args so the in-flight payload survives, a judge
-// block keeps its fixed args line, and any non-tool role just clears its pending flag.
+// an agent.Query block re-render from their raw Args so the in-flight payload survives,
+// and any non-tool role just clears its pending flag.
 func settleInterrupted(message chatMessage) chatMessage {
 	settled := message
 	settled.Pending = false
@@ -304,7 +319,7 @@ func settleInterrupted(message chatMessage) chatMessage {
 	case transcript.RoleBashExecution:
 		settled.Content = codeContent(message.Args, interruptedNote, "")
 	case transcript.RoleToolResult:
-		settled.Content = interruptedToolContent(message)
+		settled.Content = queryContent(message.Args, interruptedNote)
 	case transcript.RoleUser,
 		transcript.RoleAssistant,
 		transcript.RoleThinking,
@@ -315,16 +330,6 @@ func settleInterrupted(message chatMessage) chatMessage {
 	}
 
 	return settled
-}
-
-// interruptedToolContent re-renders an interrupted RoleToolResult block: a judge block
-// keeps its fixed args line, while an agent.Query block renders from its stored raw Args.
-func interruptedToolContent(message chatMessage) string {
-	if parseQueryContent(message.Content).Name == judgeName {
-		return judgeContent(judgeArgs, interruptedNote)
-	}
-
-	return queryContent(message.Args, interruptedNote)
 }
 
 // codeContent renders a code block's Go source, captured output, and any error into

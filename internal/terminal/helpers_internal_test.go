@@ -178,8 +178,8 @@ type mockController struct {
 
 // Start records the (query, runID) it was driven with and replays the scripted
 // channel configured via .On("Start", ...).Return(channel).
-func (m *mockController) Start(ctx context.Context, query string, runID uint64) <-chan TraceEvent {
-	args := m.Called(ctx, query, runID)
+func (m *mockController) Start(ctx context.Context, query, priorContext string, runID uint64) <-chan TraceEvent {
+	args := m.Called(ctx, query, priorContext, runID)
 
 	channel, ok := args.Get(0).(<-chan TraceEvent)
 	if !ok {
