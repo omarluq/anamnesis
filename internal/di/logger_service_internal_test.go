@@ -2,7 +2,9 @@ package di
 
 import (
 	"context"
+	"io"
 	"log/slog"
+	"path/filepath"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -60,10 +62,10 @@ func TestNewZerologLogger(t *testing.T) {
 
 			cfg := &config.Config{
 				App:     config.AppConfig{Name: "test", Env: "test"},
-				Logging: config.LoggingConfig{Level: testCase.level, Format: testCase.format},
+				Logging: config.LoggingConfig{Level: testCase.level, Format: testCase.format, File: ""},
 			}
 
-			assert.Equal(t, testCase.want, newZerologLogger(cfg).GetLevel())
+			assert.Equal(t, testCase.want, newZerologLogger(cfg, io.Discard).GetLevel())
 		})
 	}
 }
@@ -98,7 +100,9 @@ func TestNewLoggerServiceResolvesLoggers(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
-			injector := newTestInjector(t, writeConfigFile(t, testCase.config))
+			logFile := filepath.Join(t.TempDir(), "ana.log")
+			document := testCase.config + "  file: " + logFile + "\n"
+			injector := newTestInjector(t, writeConfigFile(t, document))
 
 			service, err := do.Invoke[*LoggerService](injector)
 

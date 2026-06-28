@@ -3,7 +3,6 @@ package tui
 import (
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/clipperhouse/displaywidth"
 	"github.com/gdamore/tcell/v3"
@@ -16,11 +15,6 @@ type Segment struct {
 }
 
 const tabDisplayWidth = 4
-
-// RuneLen returns the number of UTF-8 runes in text.
-func RuneLen(text string) int {
-	return utf8.RuneCountInString(text)
-}
 
 // Width returns the terminal display width of text.
 func Width(text string) int {
@@ -246,15 +240,6 @@ func Int(value int) string {
 	return strconv.Itoa(value)
 }
 
-// DrawText draws text clipped to rect width.
-func DrawText(screen ContentSetter, rect Rect, style tcell.Style, text string) {
-	if screen == nil || rect.Empty() {
-		return
-	}
-
-	drawTextAt(screen, rect.X, rect.Y, rect.Width, style, text)
-}
-
 // DrawLine draws a styled line clipped to rect width.
 func DrawLine(screen ContentSetter, rect Rect, line Line) {
 	if screen == nil || rect.Empty() {
@@ -293,39 +278,6 @@ func DrawLines(screen ContentSetter, rect Rect, lines []Line) {
 }
 
 func drawTextAt(screen ContentSetter, column, row, width int, style tcell.Style, text string) int {
-	used := 0
-	for _, segment := range Segments(text) {
-		if used+segment.Width > width {
-			break
-		}
-
-		used += WriteSegment(screen, column+used, row, width-used, segment, style)
-	}
-
-	return used
-}
-
-// WriteCells writes text into exactly width cells, filling remaining cells with spaces.
-func WriteCells(screen ContentSetter, column, row, width int, text string, style tcell.Style) int {
-	if screen == nil || row < 0 || column < 0 || width <= 0 {
-		return 0
-	}
-
-	used := WriteCellsNoFill(screen, column, row, width, text, style)
-	for used < width {
-		screen.SetContent(column+used, row, ' ', nil, style)
-		used++
-	}
-
-	return used
-}
-
-// WriteCellsNoFill writes as much text as fits in width cells without filling remaining cells.
-func WriteCellsNoFill(screen ContentSetter, column, row, width int, text string, style tcell.Style) int {
-	if screen == nil || row < 0 || column < 0 || width <= 0 {
-		return 0
-	}
-
 	used := 0
 	for _, segment := range Segments(text) {
 		if used+segment.Width > width {

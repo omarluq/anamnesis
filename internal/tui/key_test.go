@@ -9,29 +9,6 @@ import (
 	"github.com/omarluq/anamnesis/internal/tui"
 )
 
-func TestEventRune(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		event *tcell.EventKey
-		name  string
-		want  rune
-	}{
-		{name: "nil event", event: nil, want: 0},
-		{name: "empty string", event: tcell.NewEventKey(tcell.KeyRune, "", tcell.ModNone), want: 0},
-		{name: "ascii rune", event: tcell.NewEventKey(tcell.KeyRune, "a", tcell.ModNone), want: 'a'},
-		{name: "multibyte rune", event: tcell.NewEventKey(tcell.KeyRune, "λ", tcell.ModNone), want: 'λ'},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-
-			require.Equal(t, test.want, tui.EventRune(test.event))
-		})
-	}
-}
-
 func TestNewKeyEvent(t *testing.T) {
 	t.Parallel()
 

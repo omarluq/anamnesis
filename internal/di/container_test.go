@@ -1,7 +1,6 @@
 package di_test
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -16,12 +15,16 @@ import (
 
 const validConfigDocument = "app:\n  name: ana\n  env: test\nlogging:\n  level: info\n  format: json\n"
 
-// writeValidConfig writes a valid config document to a temp file and returns its path.
+// writeValidConfig writes a valid config document to a temp file and returns its
+// path. The document pins logging.file to the same temp dir so resolving the
+// LoggerService writes its log there instead of the XDG state default.
 func writeValidConfig(t *testing.T) string {
 	t.Helper()
 
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	require.NoError(t, os.WriteFile(path, []byte(validConfigDocument), 0o600))
+	dir := t.TempDir()
+	document := validConfigDocument + "  file: " + filepath.Join(dir, "ana.log") + "\n"
+	path := filepath.Join(dir, "config.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(document), 0o600))
 
 	return path
 }
@@ -65,19 +68,6 @@ func TestNewContainerErrorsOnInvalidConfig(t *testing.T) {
 
 	require.ErrorAs(t, err, &oopsErr)
 	assert.ErrorContains(t, err, "initialize container")
-}
-
-func TestContainerShutdownWithContextSucceeds(t *testing.T) {
-	t.Parallel()
-
-	container, err := di.NewContainer(writeValidConfig(t))
-	require.NoError(t, err)
-
-	report := container.ShutdownWithContext(context.Background())
-
-	require.NotNil(t, report)
-	assert.True(t, report.Succeed)
-	assert.Empty(t, report.Errors)
 }
 
 func TestRegisterServicesAllowsExternalResolution(t *testing.T) {

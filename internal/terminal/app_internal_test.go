@@ -154,11 +154,12 @@ func TestApplyTraceCodeErrorRendersRedToolBlock(t *testing.T) {
 	// error: section rather than folding it into the output text.
 	codeErr := "syntax error: unexpected EOF"
 	app.applyTrace(TraceEvent{
-		Kind:  TraceKindCodeEnd,
-		Text:  "partial stdout",
-		Err:   codeErr,
-		Depth: 0,
-		RunID: 0,
+		Kind:    TraceKindCodeEnd,
+		Text:    "partial stdout",
+		Err:     codeErr,
+		Depth:   0,
+		RunID:   0,
+		QueryID: 0,
 	})
 
 	require.Len(t, app.history, 1, "the code end settles the block in place")
@@ -208,6 +209,96 @@ func TestApplyTraceQueryEventsKeepWorkingUntilFinal(t *testing.T) {
 
 	app.applyTrace(traceEvent(TraceKindFinal, "done", 0))
 	assert.False(t, app.working, "the final answer clears the working state")
+}
+
+// TestApplyTraceQueryEndsCorrelateByQueryID is the fan-out correlation regression:
+// two sibling sub-calls open at the same depth, then their ends arrive in completion
+// order (A then B). Matching by QueryID settles A's result onto A's own block — the
+// OLDER pending block — rather than onto the newest pending block at the depth, which
+// is the wrong-pairing bug the depth-and-recency rule produced for parallel fan-out.
+func TestApplyTraceQueryEndsCorrelateByQueryID(t *testing.T) {
+	t.Parallel()
+
+	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+
+	// Sibling sub-calls fan out at one depth, each carrying its own correlation id.
+	queryEvent := func(kind TraceKind, text string, queryID uint64) TraceEvent {
+		return TraceEvent{Kind: kind, Text: text, Err: "", Depth: 1, RunID: 0, QueryID: queryID}
+	}
+
+	// Two sibling sub-calls fan out at the same depth, B opened most recently.
+	app.applyTrace(queryEvent(TraceKindQueryStart, "prompt A", 1))
+	app.applyTrace(queryEvent(TraceKindQueryStart, "prompt B", 2))
+	require.Len(t, app.history, 2)
+
+	// A's end arrives first while B is still the newest pending block at the depth.
+	// The old depth-and-recency rule would settle B here; the QueryID match settles A.
+	app.applyTrace(queryEvent(TraceKindQueryEnd, "answer A", 1))
+
+	blockA, blockB := app.history[0], app.history[1]
+	require.False(t, blockA.Pending, "A's end settles A even though B is the newer pending block")
+	assert.True(t, blockB.Pending, "B stays pending until its own end arrives")
+
+	parsedA := parseQueryContent(blockA.Content)
+	assert.Equal(t, "prompt A", parsedA.Args, "block A keeps its own prompt")
+	assert.Equal(t, "answer A", parsedA.Output, "A's result lands on A's block, not the newest pending block")
+
+	// B's end then settles B onto its own prompt.
+	app.applyTrace(queryEvent(TraceKindQueryEnd, "answer B", 2))
+
+	parsedB := parseQueryContent(app.history[1].Content)
+	require.False(t, app.history[1].Pending)
+	assert.Equal(t, "prompt B", parsedB.Args)
+	assert.Equal(t, "answer B", parsedB.Output, "B's result lands on B's block")
+}
+
+// TestApplyTraceJudgeApprovalRendersGreen drives the §16 judge block through an
+// approval: a JudgeStart opens a pending agent.Judge block, and an empty JudgeEnd
+// settles it to the standing approved line, painted with the green success
+// background a settled query shares.
+func TestApplyTraceJudgeApprovalRendersGreen(t *testing.T) {
+	t.Parallel()
+
+	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+
+	app.applyTrace(traceEvent(TraceKindJudgeStart, "the resolved answer", 0))
+
+	require.Len(t, app.history, 1)
+	pending := app.history[0]
+	assert.Equal(t, transcript.RoleToolResult, pending.Role, "a judge start opens a tool-result block")
+	require.True(t, pending.Pending, "the judge block is pending until its end")
+	assert.True(t, app.working, "a judge start marks the shell working")
+	assert.Equal(t, judgeName, parseQueryContent(pending.Content).Name, "the block is labeled agent.Judge")
+
+	app.applyTrace(traceEvent(TraceKindJudgeEnd, "", 0))
+
+	settled := app.history[0]
+	require.False(t, settled.Pending, "an empty critique settles the judge block")
+	parsed := parseQueryContent(settled.Content)
+	assert.Equal(t, judgeApprovedOutput, parsed.Output, "approval renders the standing approved line")
+	assert.Equal(t, app.theme.bg(app.theme.ToolSuccessBg), queryBlockStyle(app.theme, settled, parsed),
+		"an approving judge block paints green")
+}
+
+// TestApplyTraceJudgeCritiqueRendersAmberNotRed proves a judge critique settles the
+// block to the critique text in amber — a revision directive, distinct from the red
+// of an outright failure.
+func TestApplyTraceJudgeCritiqueRendersAmberNotRed(t *testing.T) {
+	t.Parallel()
+
+	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+
+	app.applyTrace(traceEvent(TraceKindJudgeStart, "the resolved answer", 0))
+	app.applyTrace(traceEvent(TraceKindJudgeEnd, "cite the boot the panic came from", 0))
+
+	settled := app.history[0]
+	require.False(t, settled.Pending)
+	parsed := parseQueryContent(settled.Content)
+	assert.Equal(t, "cite the boot the panic came from", parsed.Output, "the critique text settles the block")
+
+	style := queryBlockStyle(app.theme, settled, parsed)
+	assert.Equal(t, app.theme.bg(app.theme.ToolReviseBg), style, "a critique paints amber, a revision directive")
+	assert.NotEqual(t, app.theme.bg(app.theme.ToolErrorBg), style, "a critique is not a failure, so never red")
 }
 
 func TestQueryToggleRevealsContentWithThinkingAlwaysShown(t *testing.T) {

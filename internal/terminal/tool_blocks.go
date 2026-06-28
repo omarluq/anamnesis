@@ -48,8 +48,9 @@ func (app *App) renderQueryBlock(width int, message chatMessage) []tui.Line {
 	return indentQueryLines(block, message.Depth)
 }
 
-// renderQueryMode selects the block layout for the query's current state: a
-// pending sub-call, the expanded args/output view, or the collapsed preview.
+// renderQueryMode selects the block layout for the query's current state: a pending
+// sub-call (header only, or header plus its args when the user has expanded blocks),
+// the settled expanded args/output view, or the collapsed preview.
 func (app *App) renderQueryMode(
 	width int,
 	message chatMessage,
@@ -57,6 +58,8 @@ func (app *App) renderQueryMode(
 	style tcell.Style,
 ) []tui.Line {
 	switch {
+	case message.Pending && app.toolsExpanded:
+		return app.renderExpandedPendingQuery(width, parsed, style)
 	case message.Pending:
 		return renderPendingQuery(width, parsed, style)
 	case app.toolsExpanded:
@@ -66,10 +69,27 @@ func (app *App) renderQueryMode(
 	}
 }
 
-// renderPendingQuery renders an in-flight query block: the box and its header only.
+// renderPendingQuery renders a collapsed in-flight query block: the box and its
+// header only.
 func renderPendingQuery(width int, parsed parsedQuery, style tcell.Style) []tui.Line {
 	lines := queryBlockStart(width, style)
 	lines = append(lines, queryHeaderLines(width, parsed, true, style)...)
+	lines = append(lines, queryBlockEnd(width, style)...)
+
+	return lines
+}
+
+// renderExpandedPendingQuery renders an in-flight query block in full while it is
+// still running: the pending header, the collapse hint, and the args section. The
+// block has not settled, so there is no output yet to show — only the args — which
+// lets the user read the running code or sub-call prompt instead of just the
+// one-line header.
+func (app *App) renderExpandedPendingQuery(width int, parsed parsedQuery, style tcell.Style) []tui.Line {
+	lines := make([]tui.Line, 0, initialQueryBlockLines)
+	lines = append(lines, queryBlockStart(width, style)...)
+	lines = append(lines, queryHeaderLines(width, parsed, true, style)...)
+	lines = append(lines, paddedQueryLine(width, queryCollapseHint, style.Foreground(app.theme.Muted)))
+	lines = append(lines, querySectionLines(width, labelArgs, parsed.Args, style)...)
 	lines = append(lines, queryBlockEnd(width, style)...)
 
 	return lines
@@ -107,12 +127,17 @@ func (app *App) renderExpandedQuery(width int, parsed parsedQuery, style tcell.S
 	return lines
 }
 
-// queryBlockStyle picks the box background from the query's state: pending,
-// errored, or successfully completed.
+// queryBlockStyle picks the box background from the block's state: pending, a
+// judge critique asking for a revision (amber — a critique is a revision directive,
+// not a failure), errored (red), or successfully completed (green). An approving
+// judge block carries the standing approved output, so it falls through to the
+// green success branch alongside a settled query.
 func queryBlockStyle(theme Theme, message chatMessage, parsed parsedQuery) tcell.Style {
 	switch {
 	case message.Pending:
 		return theme.bg(theme.ToolPendingBg)
+	case parsed.Name == judgeName && parsed.Output != judgeApprovedOutput:
+		return theme.bg(theme.ToolReviseBg)
 	case parsed.Error != "":
 		return theme.bg(theme.ToolErrorBg)
 	default:

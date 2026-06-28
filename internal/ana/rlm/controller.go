@@ -2,9 +2,11 @@ package rlm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/samber/lo"
@@ -33,17 +35,20 @@ const forceFinishHeader = "investigation incomplete, partial findings"
 // revision directive apart from its own turn output.
 const critiqueHeader = "JUDGE CRITIQUE (revise the final answer and call agent.FINAL again): "
 
-// EvalCapture is the interpreter seam the controller loop drives each turn: Eval
-// runs the turn's generated Go against the persistent REPL session and captures
-// what it printed, and Final resolves the terminal answer once that code has
-// signaled completion. The rlm package owns this interface; *repl.Interpreter
-// satisfies it structurally, so the loop depends on a narrow contract rather than
-// on the concrete interpreter.
+// EvalCapture is the interpreter seam the controller loop drives each turn:
+// EvalContext runs the turn's generated Go against the persistent REPL session
+// under a timeout and captures what it printed, and Final resolves the terminal
+// answer once that code has signaled completion. The rlm package owns this
+// interface; *repl.Interpreter satisfies it structurally, so the loop depends on a
+// narrow contract rather than on the concrete interpreter.
 type EvalCapture interface {
-	// Eval runs src under the label name against the persistent session state,
-	// returning the captured stdout, the final expression's value, and any
-	// evaluation error.
-	Eval(name, src string) (repl.Result, error)
+	// EvalContext runs src under the label name against the persistent session
+	// state, bounded by timeout and any deadline on ctx, returning the captured
+	// stdout, the final expression's value, and any evaluation error. A
+	// non-terminating turn surfaces as an eval_timed_out error carrying the partial
+	// stdout printed before it wedged; the interpreter is then poisoned and must not
+	// be reused, so the loop force-finishes on that fault.
+	EvalContext(ctx context.Context, timeout time.Duration, name, src string) (repl.Result, error)
 	// Final resolves the terminal answer once controller code has called
 	// agent.FINAL or agent.FINAL_VAR: the recorded literal for FINAL, or the
 	// current value of the named REPL variable for FINAL_VAR. It returns false
@@ -94,8 +99,11 @@ func NewController(session *Session, eval EvalCapture) *Controller {
 // turn resolves the answer the controller signaled through agent.FINAL (a literal)
 // or agent.FINAL_VAR (the interpreter-resolved value of a named REPL variable). It
 // returns an error when a controller call fails or when the model reports Done
-// without a resolvable answer. Run drives the §6 loop only; RunAudited layers the
-// §5 judge gate on top.
+// without a resolvable answer. A turn whose eval times out — a non-terminating loop
+// the interpreter cannot preempt — force-finishes the loop too: its abandoned
+// goroutine poisons the interpreter, so the loop returns the partial findings rather
+// than taking another turn against a poisoned session. Run drives the §6 loop only;
+// RunAudited layers the §5 judge gate on top.
 func (controller *Controller) Run(ctx context.Context) (string, error) {
 	for {
 		if controller.reserveTurnOrFinish(ctx) {
@@ -111,7 +119,9 @@ func (controller *Controller) Run(ctx context.Context) (string, error) {
 			return controller.resolve()
 		}
 
-		controller.recordTurn(response)
+		if controller.recordTurn(ctx, response) {
+			return controller.forceFinish(), nil
+		}
 	}
 }
 
@@ -193,9 +203,15 @@ func (controller *Controller) validateCitations() error {
 
 // judge runs the one-shot §16 audit pass over the resolved answer, framing the
 // original question and the rendered investigation transcript as the grounding the
-// judge weighs its verdict against. It returns the judge's critique — empty on
+// judge weighs its verdict against. It brackets the call with the emitter's judge
+// lifecycle so the transcript renders a judge block: JudgeStart before the call,
+// and JudgeEnd carrying the critique after a successful one. A failed call surfaces
+// the error and emits no JudgeEnd, leaving the run to report the fault rather than
+// settling a verdict that never came. It returns the judge's critique — empty on
 // approval — wrapping a judge-call failure as an oops error in the rlm domain.
 func (controller *Controller) judge(ctx context.Context, answer string) (string, error) {
+	controller.session.Emitter.JudgeStart(answer)
+
 	critique, err := controller.session.Judge.Judge(
 		ctx,
 		controller.session.Question,
@@ -208,6 +224,8 @@ func (controller *Controller) judge(ctx context.Context, answer string) (string,
 			Code("controller_judge_failed").
 			Wrapf(err, "judge final answer")
 	}
+
+	controller.session.Emitter.JudgeEnd(critique)
 
 	return critique, nil
 }
@@ -310,28 +328,40 @@ func (controller *Controller) critiqueDirective() string {
 }
 
 // recordTurn streams the turn's reasoning and code to the transcript, evaluates the
-// turn's generated Go, and appends the resulting ControllerTurn to the session
-// history. It emits in execution order — the thinking, then the code block opening,
-// then (after evaluation) the code block's captured output — so a turn that fans out
-// via agent.Query shows its sub-call blocks nested between the code's start and its
-// settled output. The turn index is the current history length, so it stays unique
-// and monotonic even when RunAudited re-enters Run for a §5 revision pass against a
-// history that already holds the earlier turns. An evaluation fault — including a
-// recovered over-budget agent.Query panic — is recorded on the turn rather than
-// aborting the loop, so the controller sees the error on its next turn and can
-// recover.
-func (controller *Controller) recordTurn(response openai.ControllerResponse) {
+// turn's generated Go under the per-eval timeout, and appends the resulting
+// ControllerTurn to the session history, reporting whether the eval timed out — the
+// one fault the loop cannot continue past. It emits in execution order — the
+// thinking, then the code block opening, then (after evaluation) the code block's
+// captured output — so a turn that fans out via agent.Query shows its sub-call
+// blocks nested between the code's start and its settled output. The turn index is
+// the current history length, so it stays unique and monotonic even when RunAudited
+// re-enters Run for a §5 revision pass against a history that already holds the
+// earlier turns. An ordinary evaluation fault — including a recovered over-budget
+// agent.Query panic — is recorded on the turn and tolerated, so the controller sees
+// the error on its next turn and can recover; an eval_timed_out is different: it
+// abandoned a goroutine that poisons the interpreter, so recordTurn reports true and
+// the loop force-finishes rather than reusing the poisoned session.
+func (controller *Controller) recordTurn(ctx context.Context, response openai.ControllerResponse) bool {
 	index := len(controller.session.History)
 	label := fmt.Sprintf("turn_%d", index)
 
 	controller.session.Emitter.Thinking(thinkingTrace(response))
 
 	hasCode := strings.TrimSpace(response.Code) != ""
+
+	var (
+		result  repl.Result
+		evalErr error
+	)
+
+	// A Done turn carries no code (ControllerResponse.Code is empty), so skip the
+	// interpreter entirely rather than relying on Eval("") staying a benign no-op —
+	// evaluating nothing could otherwise record a spurious eval failure on the turn.
 	if hasCode {
 		controller.session.Emitter.CodeStart(response.Code)
-	}
 
-	result, evalErr := controller.evalTurn(label, response.Code)
+		result, evalErr = controller.evalTurn(ctx, label, response.Code)
+	}
 
 	controller.session.History = append(
 		controller.session.History,
@@ -341,6 +371,8 @@ func (controller *Controller) recordTurn(response openai.ControllerResponse) {
 	if hasCode {
 		controller.session.Emitter.CodeEnd(codeOutput(result), renderErr(evalErr))
 	}
+
+	return evalTimedOut(evalErr)
 }
 
 // codeOutput renders a turn's evaluation result for the transcript's code block:
@@ -370,11 +402,13 @@ func thinkingTrace(response openai.ControllerResponse) string {
 	return mo.EmptyableToOption(response.Reasoning).OrElse(response.Thinking)
 }
 
-// evalTurn runs the turn's generated Go through the interpreter, recovering an
-// over-budget agent.Query panic (SPEC §6) into an error so a saturated sub-call or
-// recursion-depth budget surfaces on the turn's Err field rather than unwinding the
-// whole loop.
-func (controller *Controller) evalTurn(label, code string) (result repl.Result, err error) {
+// evalTurn runs the turn's generated Go through the interpreter under the §6 per-eval
+// timeout, recovering an over-budget agent.Query panic (SPEC §6) into an error so a
+// saturated sub-call or recursion-depth budget surfaces on the turn's Err field
+// rather than unwinding the whole loop. A non-terminating turn comes back from
+// EvalContext as the eval_timed_out fault, which evalTimedOut tells apart from this
+// recoverable panic.
+func (controller *Controller) evalTurn(ctx context.Context, label, code string) (result repl.Result, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = oops.
@@ -384,7 +418,25 @@ func (controller *Controller) evalTurn(label, code string) (result repl.Result, 
 		}
 	}()
 
-	return controller.eval.Eval(label, code)
+	return controller.eval.EvalContext(ctx, controller.session.Budget.PerEvalTimeout, label, code)
+}
+
+// evalTimedOut reports whether err is the interpreter's eval_timed_out signal — the
+// per-eval timeout fired on a turn whose generated Go did not return. It is the one
+// eval fault the loop force-finishes on rather than recovering from: the timed-out
+// goroutine was abandoned and still poisons the interpreter, unlike the recoverable
+// controller_eval_panicked an over-budget agent.Query raises.
+func evalTimedOut(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var oopsErr oops.OopsError
+	if errors.As(err, &oopsErr) {
+		return oopsErr.Code() == "eval_timed_out"
+	}
+
+	return false
 }
 
 // resolve reads the terminal answer the interpreter holds once the model reports

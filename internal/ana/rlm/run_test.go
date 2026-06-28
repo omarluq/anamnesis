@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -17,6 +18,22 @@ import (
 	"github.com/omarluq/anamnesis/internal/openai"
 	"github.com/omarluq/anamnesis/internal/terminal"
 )
+
+// citableEntry is a fully-populated journal entry whose cursor a test can record
+// visible before the controller cites it, grounding the §7/§10 citation check.
+func citableEntry(cursor string) journal.Entry {
+	return journal.Entry{
+		Timestamp: time.Time{},
+		Cursor:    cursor,
+		BootID:    "boot-1",
+		Unit:      "checkout-api.service",
+		Comm:      "checkout-api",
+		Hostname:  "host-1",
+		Message:   "Out of memory: Killed process",
+		Priority:  2,
+		PID:       4242,
+	}
+}
 
 // investigateTraceBuffer sizes the test trace channel so a whole run's events —
 // each turn's thinking plus its code-start/code-end pair, and every sub-call's
@@ -253,7 +270,8 @@ func scriptControllerTurns(
 // second turn's code fanned out, and finally the answer — each stamped with the run
 // ID. recordTurn streams a turn's thinking before its code runs, so a sub-call's
 // query events follow their own turn's thinking rather than preceding it. The root
-// controller's sub-call carries depth 0 (its own node depth); recursive child
+// controller's sub-call renders at depth 1 — one level under its depth-0 turn —
+// since a sub-call indents below the code block that spawned it; recursive child
 // sub-calls would carry deeper levels.
 func assertTraceSequence(
 	t *testing.T,
@@ -284,8 +302,9 @@ func assertTraceSequence(
 		case terminal.TraceKindCodeEnd:
 			codeEnds++
 		case terminal.TraceKindQueryStart, terminal.TraceKindQueryEnd:
-			assert.Equal(t, 0, event.Depth, "the root sub-call carries its node depth")
-		case terminal.TraceKindThinkingDelta, terminal.TraceKindThinking, terminal.TraceKindFinal:
+			assert.Equal(t, 1, event.Depth, "the root sub-call renders one level under its depth-0 turn")
+		case terminal.TraceKindThinkingDelta, terminal.TraceKindThinking,
+			terminal.TraceKindJudgeStart, terminal.TraceKindJudgeEnd, terminal.TraceKindFinal:
 		}
 
 		if cursor < len(want) && event.Kind == want[cursor].kind && event.Text == want[cursor].text {

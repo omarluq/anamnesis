@@ -21,8 +21,8 @@ func TestEmitter(t *testing.T) {
 	emitter := rlm.NewEmitter(context.Background(), events, runID)
 
 	emitter.Thinking("planning")
-	emitter.QueryStart("fan out boot 3", 1)
-	emitter.QueryEnd("boot 3 oom-killed checkout-api", 1)
+	emitter.QueryStart(1, "fan out boot 3", 1)
+	emitter.QueryEnd(1, "boot 3 oom-killed checkout-api", 1)
 	emitter.Final("root cause: oom-kill")
 	close(events)
 
@@ -32,10 +32,13 @@ func TestEmitter(t *testing.T) {
 	}
 
 	want := []terminal.TraceEvent{
-		{Kind: terminal.TraceKindThinking, Text: "planning", Err: "", Depth: 0, RunID: runID},
-		{Kind: terminal.TraceKindQueryStart, Text: "fan out boot 3", Err: "", Depth: 1, RunID: runID},
-		{Kind: terminal.TraceKindQueryEnd, Text: "boot 3 oom-killed checkout-api", Err: "", Depth: 1, RunID: runID},
-		{Kind: terminal.TraceKindFinal, Text: "root cause: oom-kill", Err: "", Depth: 0, RunID: runID},
+		{Kind: terminal.TraceKindThinking, Text: "planning", Err: "", Depth: 0, RunID: runID, QueryID: 0},
+		{Kind: terminal.TraceKindQueryStart, Text: "fan out boot 3", Err: "", Depth: 1, RunID: runID, QueryID: 1},
+		{
+			Kind: terminal.TraceKindQueryEnd, Text: "boot 3 oom-killed checkout-api",
+			Err: "", Depth: 1, RunID: runID, QueryID: 1,
+		},
+		{Kind: terminal.TraceKindFinal, Text: "root cause: oom-kill", Err: "", Depth: 0, RunID: runID, QueryID: 0},
 	}
 
 	require.Len(t, got, len(want))
@@ -57,10 +60,10 @@ func TestEmitterCarriesQueryDepth(t *testing.T) {
 	events := make(chan terminal.TraceEvent, 4)
 	emitter := rlm.NewEmitter(context.Background(), events, runID)
 
-	emitter.QueryStart("outer", 1)
-	emitter.QueryStart("inner", 2)
-	emitter.QueryEnd("inner result", 2)
-	emitter.QueryEnd("outer result", 1)
+	emitter.QueryStart(1, "outer", 1)
+	emitter.QueryStart(2, "inner", 2)
+	emitter.QueryEnd(2, "inner result", 2)
+	emitter.QueryEnd(1, "outer result", 1)
 	close(events)
 
 	got := make([]terminal.TraceEvent, 0, 4)
@@ -71,12 +74,46 @@ func TestEmitterCarriesQueryDepth(t *testing.T) {
 	require.Len(t, got, 4)
 	assert.Equal(t, terminal.TraceKindQueryStart, got[0].Kind)
 	assert.Equal(t, 1, got[0].Depth)
+	assert.Equal(t, uint64(1), got[0].QueryID, "the emitter stamps the start's id")
 	assert.Equal(t, terminal.TraceKindQueryStart, got[1].Kind)
 	assert.Equal(t, 2, got[1].Depth)
+	assert.Equal(t, uint64(2), got[1].QueryID)
 	assert.Equal(t, terminal.TraceKindQueryEnd, got[2].Kind)
 	assert.Equal(t, 2, got[2].Depth)
+	assert.Equal(t, uint64(2), got[2].QueryID, "the inner end carries the inner start's id")
 	assert.Equal(t, terminal.TraceKindQueryEnd, got[3].Kind)
 	assert.Equal(t, 1, got[3].Depth)
+	assert.Equal(t, uint64(1), got[3].QueryID, "the outer end carries the outer start's id")
+}
+
+// TestEmitterJudgeLifecycle proves the judge lifecycle methods emit the §16 judge
+// kinds at depth 0 with a zero QueryID: JudgeStart carries the answer under review
+// and JudgeEnd carries the critique (empty on approval).
+func TestEmitterJudgeLifecycle(t *testing.T) {
+	t.Parallel()
+
+	const runID = uint64(13)
+
+	events := make(chan terminal.TraceEvent, 2)
+	emitter := rlm.NewEmitter(context.Background(), events, runID)
+
+	emitter.JudgeStart("the resolved answer")
+	emitter.JudgeEnd("cite the originating boot")
+	close(events)
+
+	got := make([]terminal.TraceEvent, 0, 2)
+	for event := range events {
+		got = append(got, event)
+	}
+
+	require.Len(t, got, 2)
+	assert.Equal(t, terminal.TraceKindJudgeStart, got[0].Kind)
+	assert.Equal(t, "the resolved answer", got[0].Text)
+	assert.Equal(t, 0, got[0].Depth)
+	assert.Equal(t, uint64(0), got[0].QueryID, "a judge event carries no query-correlation id")
+	assert.Equal(t, terminal.TraceKindJudgeEnd, got[1].Kind)
+	assert.Equal(t, "cite the originating boot", got[1].Text)
+	assert.Equal(t, runID, got[1].RunID)
 }
 
 // TestEmitterAbandonsBlockedSendOnCancel exercises the cancel-safe send path: a

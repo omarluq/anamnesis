@@ -37,20 +37,6 @@ func (rect Rect) Empty() bool {
 	return rect.Width <= 0 || rect.Height <= 0
 }
 
-// Inner returns rect shrunk by padding on all sides.
-func (rect Rect) Inner(padding int) Rect {
-	if padding <= 0 {
-		return rect
-	}
-
-	return Rect{
-		X:      rect.X + padding,
-		Y:      rect.Y + padding,
-		Width:  max(0, rect.Width-padding*2),
-		Height: max(0, rect.Height-padding*2),
-	}
-}
-
 // Span is one styled segment inside a line.
 type Span struct {
 	Style tcell.Style

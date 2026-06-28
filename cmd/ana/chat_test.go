@@ -61,11 +61,12 @@ var _ terminal.Controller = (*mockChatController)(nil)
 // scripted run readable while satisfying exhaustruct.
 func chatTrace(kind terminal.TraceKind, text string) terminal.TraceEvent {
 	return terminal.TraceEvent{
-		Kind:  kind,
-		Text:  text,
-		Err:   "",
-		Depth: 0,
-		RunID: 0,
+		Kind:    kind,
+		Text:    text,
+		Err:     "",
+		Depth:   0,
+		RunID:   0,
+		QueryID: 0,
 	}
 }
 

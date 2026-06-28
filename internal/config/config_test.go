@@ -74,7 +74,7 @@ func TestConfigValidate(t *testing.T) {
 
 			cfg := config.Config{
 				App:     config.AppConfig{Name: testCase.appName, Env: testCase.env},
-				Logging: config.LoggingConfig{Level: testCase.level, Format: testCase.format},
+				Logging: config.LoggingConfig{Level: testCase.level, Format: testCase.format, File: ""},
 			}
 
 			err := cfg.Validate()
@@ -95,33 +95,6 @@ func TestConfigValidate(t *testing.T) {
 	}
 }
 
-func TestConfigIsDev(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name string
-		env  string
-		want bool
-	}{
-		{name: envDev, env: envDev, want: true},
-		{name: envProd, env: envProd, want: false},
-		{name: envTest, env: envTest, want: false},
-	}
-
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			t.Parallel()
-
-			cfg := config.Config{
-				App:     config.AppConfig{Name: appName, Env: testCase.env},
-				Logging: config.LoggingConfig{Level: levelInfo, Format: formatPretty},
-			}
-
-			assert.Equal(t, testCase.want, cfg.IsDev())
-		})
-	}
-}
-
 func TestLoadValidFile(t *testing.T) {
 	t.Parallel()
 
@@ -137,7 +110,7 @@ logging:
 	require.NoError(t, err)
 	assert.Equal(t, config.Config{
 		App:     config.AppConfig{Name: "testapp", Env: envProd},
-		Logging: config.LoggingConfig{Level: "warn", Format: "json"},
+		Logging: config.LoggingConfig{Level: "warn", Format: "json", File: ""},
 	}, *cfg)
 }
 
@@ -150,7 +123,7 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, config.Config{
 		App:     config.AppConfig{Name: "customapp", Env: envDev},
-		Logging: config.LoggingConfig{Level: levelInfo, Format: formatPretty},
+		Logging: config.LoggingConfig{Level: levelInfo, Format: formatPretty, File: ""},
 	}, *cfg)
 }
 

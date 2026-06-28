@@ -3,8 +3,8 @@ package terminal
 // TraceKind labels the category of a TraceEvent emitted by a controller. The set
 // is the shared contract the RLM emitter (internal/ana/rlm) produces and the chat
 // transcript consumes: thinking turns, the start and completion of a turn's code
-// evaluation, the start and completion of a recursive agent.Query sub-call, and
-// the final answer.
+// evaluation, the start and completion of a recursive agent.Query sub-call, the
+// start and completion of the §16 judge pass, and the final answer.
 type TraceKind string
 
 const (
@@ -27,8 +27,16 @@ const (
 	// transcript opens a pending query block, indented by Depth.
 	TraceKindQueryStart TraceKind = "query-start"
 	// TraceKindQueryEnd marks the completion of the matching agent.Query sub-call;
-	// the transcript fills the pending block's output section.
+	// the transcript fills the pending block's output section. Its QueryID matches
+	// the TraceKindQueryStart it completes, so parallel fan-out pairs each end with
+	// its own start rather than by completion order.
 	TraceKindQueryEnd TraceKind = "query-end"
+	// TraceKindJudgeStart marks the start of the §16 judge pass over a resolved
+	// answer; the transcript opens a pending judge block at depth 0.
+	TraceKindJudgeStart TraceKind = "judge-start"
+	// TraceKindJudgeEnd marks the completion of the judge pass; the transcript
+	// settles the pending judge block as an approval (empty text) or a critique.
+	TraceKindJudgeEnd TraceKind = "judge-end"
 	// TraceKindFinal marks the final answer produced by the loop; the transcript
 	// renders it as assistant markdown.
 	TraceKindFinal TraceKind = "final"
@@ -54,4 +62,9 @@ type TraceEvent struct {
 	Depth int
 	// RunID identifies the run that produced the event for stale-event gating.
 	RunID uint64
+	// QueryID correlates a TraceKindQueryStart with its matching TraceKindQueryEnd:
+	// every sub-call is minted a unique id so the transcript pairs an end with its
+	// own start even when parallel fan-out completes out of order. It is 0 on every
+	// non-query event.
+	QueryID uint64
 }

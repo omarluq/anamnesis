@@ -97,7 +97,7 @@ func TestConfigEntries(t *testing.T) {
 
 	cfg := &config.Config{
 		App:     config.AppConfig{Name: valAppName, Env: valAppEnv},
-		Logging: config.LoggingConfig{Level: valLogLevel, Format: valLogFormat},
+		Logging: config.LoggingConfig{Level: valLogLevel, Format: valLogFormat, File: ""},
 	}
 
 	lookup := lo.SliceToMap(configEntries(cfg), func(e configEntry) (string, string) {
