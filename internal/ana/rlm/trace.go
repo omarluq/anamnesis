@@ -22,9 +22,9 @@ var _ QueryTracer = (*Emitter)(nil)
 
 // NewEmitter returns an Emitter that sends on events and stamps each event with
 // runID. It captures ctx.Done() so every send races the run context's cancellation:
-// a stalled UI consumer (or the §6 wall-clock deadline) unblocks the emitter instead
-// of wedging the run on a full trace channel — a hazard recursion amplifies because
-// child loops and fan-out all share one run emitter.
+// a stalled UI consumer (or a canceled run) unblocks the emitter instead of wedging
+// the run on a full trace channel — a hazard recursion amplifies because child loops
+// and fan-out all share one run emitter.
 func NewEmitter(ctx context.Context, events chan<- terminal.TraceEvent, runID uint64) *Emitter {
 	return &Emitter{done: ctx.Done(), events: events, runID: runID}
 }
@@ -130,7 +130,7 @@ func (emitter *Emitter) emit(kind terminal.TraceKind, text string) {
 
 // send posts event on the trace channel but abandons the send when the run context
 // is canceled first, so a full channel (or a stalled UI consumer) cannot wedge the
-// run past its §6 wall-clock deadline.
+// run past a context cancellation.
 func (emitter *Emitter) send(event terminal.TraceEvent) {
 	select {
 	case emitter.events <- event:

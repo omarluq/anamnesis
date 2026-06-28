@@ -24,7 +24,7 @@ const (
 	// fills the pending code block's output section with the captured result.
 	TraceKindCodeEnd TraceKind = "code-end"
 	// TraceKindQueryStart marks the start of a recursive agent.Query sub-call; the
-	// transcript opens a pending query block, indented by Depth.
+	// transcript opens a pending query block.
 	TraceKindQueryStart TraceKind = "query-start"
 	// TraceKindQueryEnd marks the completion of the matching agent.Query sub-call;
 	// the transcript fills the pending block's output section. Its QueryID matches
@@ -57,8 +57,9 @@ type TraceEvent struct {
 	// success. A non-empty Err lands in the block's error: section and paints the
 	// block red.
 	Err string
-	// Depth is the recursive sub-call nesting level: 0 for a top-level turn and
-	// higher for nested fan-out, indenting the rendered query block.
+	// Depth is the recursive sub-call nesting level recorded on the event: 0 for a
+	// top-level turn and higher for nested fan-out. It is carried for trace fidelity
+	// (the emitter stamps it and the run-end log reports it), not to indent the block.
 	Depth int
 	// RunID identifies the run that produced the event for stale-event gating.
 	RunID uint64

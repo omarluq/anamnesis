@@ -98,22 +98,9 @@ func (controller *replayController) wait(ctx context.Context) bool {
 // query (its start and completing result one level deep), and the FINAL answer.
 func defaultReplayScript() []TraceEvent {
 	return []TraceEvent{
-		replayLine(TraceKindThinking, "Inspecting the latest boot for failure signatures.", 0),
-		replayLine(TraceKindQueryStart, "summarize the panic backtrace", 1),
-		replayLine(TraceKindQueryEnd, "the i915 GPU driver oopsed during resume", 1),
-		replayLine(TraceKindFinal, replayFinalAnswer, 0),
-	}
-}
-
-// replayLine builds a TraceEvent of kind carrying text at the given recursion
-// depth.
-func replayLine(kind TraceKind, text string, depth int) TraceEvent {
-	return TraceEvent{
-		Kind:    kind,
-		Text:    text,
-		Err:     "",
-		QueryID: 0,
-		Depth:   depth,
-		RunID:   0,
+		traceDepthEvent(TraceKindThinking, "Inspecting the latest boot for failure signatures.", 0),
+		traceDepthEvent(TraceKindQueryStart, "summarize the panic backtrace", 1),
+		traceDepthEvent(TraceKindQueryEnd, "the i915 GPU driver oopsed during resume", 1),
+		traceDepthEvent(TraceKindFinal, replayFinalAnswer, 0),
 	}
 }

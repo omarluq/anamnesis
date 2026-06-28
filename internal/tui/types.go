@@ -7,21 +7,10 @@ package tui
 
 import "github.com/gdamore/tcell/v3"
 
-// Style aliases the tcell/v3 style type used throughout the package.
-type Style = tcell.Style
-
-// Color aliases the tcell/v3 color type used throughout the package.
-type Color = tcell.Color
-
 // ContentSetter is the subset of tcell.Screen required by draw helpers.
 // It only requires SetContent so tests and buffers can provide lightweight sinks.
 type ContentSetter interface {
 	SetContent(column, row int, mainc rune, combc []rune, style tcell.Style)
-}
-
-// Drawer is the minimal drawable component contract.
-type Drawer interface {
-	Draw(screen ContentSetter, rect Rect)
 }
 
 // Rect describes a terminal rectangle.

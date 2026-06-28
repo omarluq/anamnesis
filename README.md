@@ -17,28 +17,30 @@ anamnesis _(/ˌanəmˈnēsəs/, Greek for "remembrance", a calling-to-mind [^1])
 
 ## What it is
 
-`anamnesis` is a single static binary, `ana`. You run `ana`, type a question
-(_"what was wrong with my box around 09:00 this morning?"_), and an agent investigates
-your live `journald` end to end.
+**ana is an SRE agent specialized in Linux incident investigation, built in Go on a
+Recursive Language Model loop that runs gpt-5.5 over an embedded mvm interpreter.** It's a
+single static binary that lives on the box and reads your live `journald` the way an
+on-call engineer would.
+
+You run `ana`, type a question (_"what was wrong with my box around 09:00 this morning?"_),
+and it investigates end to end: finding the boot that broke, the unit that's noisy, the
+OOM-kill in the timeline, and the exact entries that prove it, then handing you a cited
+answer.
 
 The twist is _how_ it reads the journal. It never dumps the log firehose into a model's
-context window. Instead, a **controller model writes Go**, that Go runs inside an embedded
+context window. Instead, a **controller model writes Go**, that Go runs inside the
 interpreter against a tiny host API (`journal.*`, `systemd.*`, `agent.*`), and the model
 only ever sees the **structured results its own code produced**. When a slice of the
 journal is too noisy to reason over directly, the code hands it to a **bounded sub-LLM
-call**, which can itself spin up a deeper investigation. When the controller is ready it
-emits a **cited `FINAL` answer**, and a separate **judge** model audits that answer
-against its evidence before it's allowed to render.
-
-The whole thing is live in a terminal UI. You watch the generated Go, the interpreter's
-output, the sub-call fan-out, and a running token/cost meter, turn by turn, as the
-investigation unfolds.
+call**, which can itself spin up a deeper investigation. Once the controller has an answer
+it emits a **cited `FINAL`**, and a separate **judge** model audits it against its evidence
+before it renders.
 
 ## Why journald + RLM + Go
 
 There are a few opinions baked into this, and the combination is really the point.
 
-It starts with journald, which is the richest pile of signal on a Linux box, and almost
+It starts with journald, which is the richest pile of signals on a Linux box, and almost
 nobody reads it directly. A single boot can be hundreds of megabytes of _structured_
 records, each one tagged with the boot it came from (`_BOOT_ID`), the unit that wrote it
 (`_SYSTEMD_UNIT`), a priority, a stable cursor (`__CURSOR`), a real timestamp. Most tools
@@ -60,13 +62,6 @@ Being honest about it, this is bounded, depth-limited fan-out of smaller LLM cal
 than a true recursive REPL, but it keeps the part that matters: breaking a big problem down
 without drowning the model in raw logs.
 
-And it had to be Go. journald is a Linux thing and the tooling around it is mostly Go, so
-the code the controller writes should be Go too. `ana` runs that code through
-[mvm](https://github.com/mvm-sh/mvm), a small Go interpreter, because it compiles and runs
-fresh Go on every single turn, which puts interpreter speed right on the hot path. mvm is
-still alpha, and that's on purpose: this is about showing the right shape, not shipping a
-bulletproof sandbox.
-
 ## How it works
 
 Three layers, each with one job. The **terminal** watches; the **controller** thinks; the
@@ -78,7 +73,7 @@ flowchart TB
     user([You: a plain-English question])
 
     subgraph tui["the terminal UI"]
-        shell["chat · live trace · cost panes"]
+        shell["chat"]
     end
 
     subgraph ctl["internal/ana/rlm — the controller"]
@@ -119,12 +114,6 @@ the code printed and returned, and folds _only that_ back into the next turn's c
 That bounded re-entry is the whole point. It's what stops a 200-megabyte boot from ever
 reaching the model. The loop ends when the model calls `agent.FINAL` (or `agent.FINAL_VAR`
 to return a REPL variable).
-
-There is **no turn budget and no wall-clock deadline**. A healthy investigation runs until
-the model is genuinely done. The only guards are structural: recursion depth and total
-sub-call count are capped so fan-out can't run away, and a single per-eval timeout catches
-a non-terminating generated loop (the interpreter can't be preempted, so a runaway
-`for {}` would otherwise hang).
 
 ```mermaid
 sequenceDiagram
@@ -206,9 +195,6 @@ Two run-time requirements:
   (controller, sub, and judge) with **no fallback**: if the key lacks access it fails
   loudly rather than silently downgrading.
 
-`cgo` is needed for the journal reader only; the `systemd` unit-status path is pure Go via
-dbus. Cross-compilation is a non-goal.
-
 ## Quickstart
 
 ```bash
@@ -217,7 +203,7 @@ cd anamnesis
 mise install                       # optional: pinned Go / Task / golangci-lint
 export OPENAI_API_KEY=sk-...        # must have gpt-5.5 access
 
-mise exec -- task run               # build ./bin/ana and launch it
+task run               # build ./bin/ana and launch it
 ```
 
 `task run` builds the binary and drops you straight into the interactive TUI against the

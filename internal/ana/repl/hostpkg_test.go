@@ -3,12 +3,12 @@ package repl_test
 import (
 	"testing"
 
-	"github.com/samber/oops"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/omarluq/anamnesis/internal/ana/repl"
+	"github.com/omarluq/anamnesis/internal/ana/repl/repltest"
 )
 
 // fakeEntry is the sample host record the round-trip test registers and ranges
@@ -102,11 +102,7 @@ func TestRegisterSurfaceRejectsNonInterface(t *testing.T) {
 	err := repl.RegisterSurface[*mockJournal](interpreter, "journal", new(mockJournal))
 	require.Error(t, err)
 
-	var oopsErr oops.OopsError
-
-	require.ErrorAs(t, err, &oopsErr)
-	assert.Equal(t, "repl", oopsErr.Domain())
-	assert.Equal(t, "host_surface_not_interface", oopsErr.Code())
+	repltest.RequireOopsCode(t, err, "repl", "host_surface_not_interface")
 }
 
 // TestRegisterSurfaceRejectsNilSurface proves the bridge converts a nil surface
@@ -120,11 +116,7 @@ func TestRegisterSurfaceRejectsNilSurface(t *testing.T) {
 	err := repl.RegisterSurface[journalQuerier](interpreter, "journal", nil)
 	require.Error(t, err)
 
-	var oopsErr oops.OopsError
-
-	require.ErrorAs(t, err, &oopsErr)
-	assert.Equal(t, "repl", oopsErr.Domain())
-	assert.Equal(t, "host_surface_nil", oopsErr.Code())
+	repltest.RequireOopsCode(t, err, "repl", "host_surface_nil")
 }
 
 // TestRegisterSurfaceRejectsTypedNilSurface proves the bridge rejects a typed-nil
@@ -142,11 +134,7 @@ func TestRegisterSurfaceRejectsTypedNilSurface(t *testing.T) {
 	err := repl.RegisterSurface[journalQuerier](interpreter, "journal", surface)
 	require.Error(t, err)
 
-	var oopsErr oops.OopsError
-
-	require.ErrorAs(t, err, &oopsErr)
-	assert.Equal(t, "repl", oopsErr.Domain())
-	assert.Equal(t, "host_surface_nil", oopsErr.Code())
+	repltest.RequireOopsCode(t, err, "repl", "host_surface_nil")
 }
 
 // TestRegisterSurfaceRejectsEmptyInterface proves the bridge refuses a zero-method
@@ -160,9 +148,5 @@ func TestRegisterSurfaceRejectsEmptyInterface(t *testing.T) {
 	err := repl.RegisterSurface[any](interpreter, "empty", new(mockJournal))
 	require.Error(t, err)
 
-	var oopsErr oops.OopsError
-
-	require.ErrorAs(t, err, &oopsErr)
-	assert.Equal(t, "repl", oopsErr.Domain())
-	assert.Equal(t, "host_surface_empty", oopsErr.Code())
+	repltest.RequireOopsCode(t, err, "repl", "host_surface_empty")
 }

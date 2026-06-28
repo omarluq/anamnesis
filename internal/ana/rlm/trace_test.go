@@ -120,8 +120,8 @@ func TestEmitterJudgeLifecycle(t *testing.T) {
 
 // TestEmitterAbandonsBlockedSendOnCancel exercises the cancel-safe send path: a
 // send that blocks on an undrained trace channel must return once the run context
-// is canceled, so a stalled UI consumer (or the §6 wall-clock deadline) unblocks
-// the emitter instead of wedging the run on a full channel.
+// is canceled, so a stalled UI consumer (or a canceled run) unblocks the emitter
+// instead of wedging the run on a full channel.
 func TestEmitterAbandonsBlockedSendOnCancel(t *testing.T) {
 	t.Parallel()
 

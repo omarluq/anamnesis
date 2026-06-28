@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/omarluq/anamnesis/internal/ana/repl"
+	"github.com/omarluq/anamnesis/internal/ana/repl/repltest"
 	"github.com/omarluq/anamnesis/internal/ana/rlm"
 	"github.com/omarluq/anamnesis/internal/ana/scenarios"
 	"github.com/omarluq/anamnesis/internal/openai"
@@ -79,8 +80,8 @@ func TestInvestigateRecursesThroughChildControllerLoop(t *testing.T) {
 		Controller:  controllerLLM,
 		Sub:         sub,
 		Judge:       judge,
-		Journal:     new(mockJournalHost),
-		Systemd:     new(mockSystemdHost),
+		Journal:     new(repltest.MockJournal),
+		Systemd:     new(repltest.MockSystemd),
 		Events:      events,
 		RunID:       fixtureRunID,
 		MaxDepth:    1,
@@ -129,8 +130,8 @@ func TestInvestigateSharedBudgetCapsSubCallsTreeWide(t *testing.T) {
 		Controller:  controllerLLM,
 		Sub:         sub,
 		Judge:       judge,
-		Journal:     new(mockJournalHost),
-		Systemd:     new(mockSystemdHost),
+		Journal:     new(repltest.MockJournal),
+		Systemd:     new(repltest.MockSystemd),
 		Events:      events,
 		RunID:       fixtureRunID,
 		MaxDepth:    1,
@@ -179,8 +180,8 @@ func TestInvestigateQueryBatchedFanOutRacesCleanly(t *testing.T) {
 		Controller:  controllerLLM,
 		Sub:         sub,
 		Judge:       judge,
-		Journal:     new(mockJournalHost),
-		Systemd:     new(mockSystemdHost),
+		Journal:     new(repltest.MockJournal),
+		Systemd:     new(repltest.MockSystemd),
 		Events:      events,
 		RunID:       fixtureRunID,
 		MaxDepth:    0,
@@ -239,8 +240,8 @@ func TestInvestigateRecursiveFanOutKeepsEveryBranch(t *testing.T) {
 		Controller:  controllerLLM,
 		Sub:         sub,
 		Judge:       judge,
-		Journal:     new(mockJournalHost),
-		Systemd:     new(mockSystemdHost),
+		Journal:     new(repltest.MockJournal),
+		Systemd:     new(repltest.MockSystemd),
 		Events:      events,
 		RunID:       fixtureRunID,
 		MaxDepth:    1,

@@ -67,7 +67,7 @@ func (client *Client) Sub(ctx context.Context, prompt, evidence string) (SubResu
 		Reasoning:    responses.ReasoningParam{Effort: client.subEffort},
 	}, nil, "sub")
 	if err != nil {
-		return failedSubCall(err)
+		return SubResult{Text: ""}, err
 	}
 
 	return SubResult{Text: strings.TrimSpace(output)}, nil
@@ -92,11 +92,4 @@ func truncateEvidence(evidence string) string {
 	keep := MaxSubEvidenceBytes - len(truncationMarker)
 
 	return strings.ToValidUTF8(evidence[:keep], "") + truncationMarker
-}
-
-// failedSubCall pairs the zero SubResult with err so Sub's error path returns a
-// fully-initialized result without an inline literal. Sub has a single error path
-// today; the helper exists for parity with failedControllerTurn and failedJudgePass.
-func failedSubCall(err error) (SubResult, error) {
-	return SubResult{Text: ""}, err
 }

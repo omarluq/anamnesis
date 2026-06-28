@@ -11,7 +11,6 @@ type ToolEvent struct {
 	DetailsJSON   string
 	Result        string
 	Error         string
-	IsError       bool
 }
 
 // FormatToolEventDisplay formats a tool event for terminal display.

@@ -203,6 +203,102 @@ func newControllerClient(t *testing.T, transport http.RoundTripper, opts ...open
 	return client
 }
 
+// newClientServing builds an openai client whose single Responses call is answered
+// by a mock transport returning (status, body), the one-canned-response setup almost
+// every role test shares. It returns the transport too so the caller can assert the
+// call count and the no-fallback contract. Tests that tune the client (a non-default
+// reasoning effort) drive captureRequest, which threads options through instead.
+func newClientServing(t *testing.T, status int, body string) (*openai.Client, *mockTransport) {
+	t.Helper()
+
+	transport := new(mockTransport)
+	transport.
+		On("RoundTrip", mock.Anything).
+		Return(status, body, nil).
+		Once()
+
+	return newControllerClient(t, transport), transport
+}
+
+// captureRequest drives one role call through a mock transport that records the
+// outgoing request body during RoundTrip, returning that raw body so a test can
+// assert on what actually went over the wire (model id, token caps, schema, framed
+// input). canned is the success stream the call receives, call issues the role call
+// against the built client, and opts tune the client. The controller, sub and judge
+// request-shape tests share it.
+func captureRequest(t *testing.T, canned string, call func(client *openai.Client) error, opts ...openai.Option) []byte {
+	t.Helper()
+
+	var body []byte
+
+	transport := new(mockTransport)
+	transport.
+		On("RoundTrip", mock.Anything).
+		Run(func(args mock.Arguments) {
+			req, ok := args.Get(0).(*http.Request)
+			require.True(t, ok, "RoundTrip receives an *http.Request")
+			require.NotNil(t, req.Body, "the call carries a request body")
+
+			raw, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+
+			body = raw
+		}).
+		Return(http.StatusOK, canned, nil).
+		Once()
+
+	client := newControllerClient(t, transport, opts...)
+
+	require.NoError(t, call(client))
+
+	transport.AssertExpectations(t)
+	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
+
+	return body
+}
+
+// modelNotFoundBody is the Responses API error body returned when the key lacks
+// gpt-5.5 access — the no-fallback contract's trigger — hoisted here so the
+// controller, sub and judge model-not-found tests assert against one wire payload.
+const modelNotFoundBody = `{"error":{"message":"The model gpt-5.5 does not exist or you do not have access to it.",` +
+	`"type":"invalid_request_error","param":null,"code":"model_not_found"}}`
+
+// assertOpenAICode asserts err is oops-wrapped in the openai domain under wantCode.
+func assertOpenAICode(t *testing.T, err error, wantCode string) {
+	t.Helper()
+
+	oopsErr, ok := oops.AsOops(err)
+	require.True(t, ok, "the error is oops-wrapped")
+	assert.Equal(t, "openai", oopsErr.Domain())
+	assert.Equal(t, wantCode, oopsErr.Code())
+}
+
+// assertModelNotFoundSurface drives one role call against a transport returning the
+// model_not_found rejection and asserts the shared no-fallback surface: the turn
+// fails under the openai domain and wantCode, the rejection surfaces as an
+// *openaisdk.Error carrying model_not_found and 404, and exactly one request went
+// out with no retry to a weaker model. call issues the role call and asserts its
+// zero result, returning the error for the shared shape checks.
+func assertModelNotFoundSurface(t *testing.T, wantCode string, call func(client *openai.Client) error) {
+	t.Helper()
+
+	client, transport := newClientServing(t, http.StatusNotFound, modelNotFoundBody)
+
+	err := call(client)
+	require.Error(t, err)
+
+	assertOpenAICode(t, err, wantCode)
+
+	var apiErr *openaisdk.Error
+
+	require.ErrorAs(t, err, &apiErr, "the gpt-5.5 rejection surfaces as an openai API error")
+	assert.Equal(t, "model_not_found", apiErr.Code)
+	assert.Equal(t, http.StatusNotFound, apiErr.StatusCode)
+
+	transport.AssertExpectations(t)
+	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
+}
+
 func TestControllerParsesStructuredResponse(t *testing.T) {
 	t.Parallel()
 
@@ -212,13 +308,7 @@ func TestControllerParsesStructuredResponse(t *testing.T) {
 		Done:     false,
 	}
 
-	transport := new(mockTransport)
-	transport.
-		On("RoundTrip", mock.Anything).
-		Return(http.StatusOK, controllerResponseBody(t, reply), nil).
-		Once()
-
-	client := newControllerClient(t, transport)
+	client, transport := newClientServing(t, http.StatusOK, controllerResponseBody(t, reply))
 
 	result, err := client.Controller(context.Background(), "system prompt", "USER: why did sshd fail?", nil)
 	require.NoError(t, err)
@@ -263,15 +353,9 @@ func TestControllerExtractsReasoningSummaryOntoResult(t *testing.T) {
 		Done:     false,
 	}
 
-	transport := new(mockTransport)
-	transport.
-		On("RoundTrip", mock.Anything).
-		Return(http.StatusOK, reasoningControllerResponseBody(t, reply,
-			"First I listed the recent boots to find the failing window.",
-			"Then I narrowed in on sshd, which OOM-killed at 09:01."), nil).
-		Once()
-
-	client := newControllerClient(t, transport)
+	client, transport := newClientServing(t, http.StatusOK, reasoningControllerResponseBody(t, reply,
+		"First I listed the recent boots to find the failing window.",
+		"Then I narrowed in on sshd, which OOM-killed at 09:01."))
 
 	var streamed strings.Builder
 
@@ -302,13 +386,7 @@ func TestControllerLeavesReasoningEmptyWhenNoSummaryReturned(t *testing.T) {
 		Done:     false,
 	}
 
-	transport := new(mockTransport)
-	transport.
-		On("RoundTrip", mock.Anything).
-		Return(http.StatusOK, controllerResponseBody(t, reply), nil).
-		Once()
-
-	client := newControllerClient(t, transport)
+	client, transport := newClientServing(t, http.StatusOK, controllerResponseBody(t, reply))
 
 	result, err := client.Controller(context.Background(), "system prompt", "USER: why did sshd fail?", nil)
 	require.NoError(t, err)
@@ -322,77 +400,30 @@ func TestControllerLeavesReasoningEmptyWhenNoSummaryReturned(t *testing.T) {
 func TestControllerSurfacesModelNotFoundWithNoFallback(t *testing.T) {
 	t.Parallel()
 
-	const errorBody = `{"error":{"message":"The model gpt-5.5 does not exist or you do not have access to it.",` +
-		`"type":"invalid_request_error","param":null,"code":"model_not_found"}}`
+	assertModelNotFoundSurface(t, "controller_call_failed", func(client *openai.Client) error {
+		result, err := client.Controller(context.Background(), "system prompt", "USER: why did sshd fail?", nil)
+		assert.Equal(t, openai.ControllerResult{
+			Response: openai.ControllerResponse{Thinking: "", Code: "", Done: false},
+		}, result, "a failed turn yields the zero result")
 
-	transport := new(mockTransport)
-	transport.
-		On("RoundTrip", mock.Anything).
-		Return(http.StatusNotFound, errorBody, nil).
-		Once()
-
-	client := newControllerClient(t, transport)
-
-	result, err := client.Controller(context.Background(), "system prompt", "USER: why did sshd fail?", nil)
-	require.Error(t, err)
-
-	assert.Equal(t, openai.ControllerResult{
-		Response: openai.ControllerResponse{Thinking: "", Code: "", Done: false},
-	}, result, "a failed turn yields the zero result")
-
-	oopsErr, ok := oops.AsOops(err)
-	require.True(t, ok, "the error is oops-wrapped")
-	assert.Equal(t, "openai", oopsErr.Domain())
-	assert.Equal(t, "controller_call_failed", oopsErr.Code())
-
-	var apiErr *openaisdk.Error
-
-	require.ErrorAs(t, err, &apiErr, "the gpt-5.5 rejection surfaces as an openai API error")
-	assert.Equal(t, "model_not_found", apiErr.Code)
-	assert.Equal(t, http.StatusNotFound, apiErr.StatusCode)
-
-	transport.AssertExpectations(t)
-	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
+		return err
+	})
 }
 
-// captureControllerRequest drives one Controller call through a mock transport that
-// records the outgoing request body during RoundTrip, returning that raw body so a
-// test can assert on what actually went over the wire (model id, the §6 token cap,
-// the strict structured-output schema, and the instructions and input).
+// captureControllerRequest drives one Controller call through captureRequest with a
+// canned "done" reply, returning the raw outgoing request body so a test can assert
+// on what actually went over the wire (model id, the §6 token cap, the strict
+// structured-output schema, and the instructions and input).
 func captureControllerRequest(t *testing.T, instructions, input string, opts ...openai.Option) []byte {
 	t.Helper()
 
-	var body []byte
+	canned := controllerResponseBody(t, openai.ControllerResponse{Thinking: "done", Code: "", Done: true})
 
-	transport := new(mockTransport)
-	transport.
-		On("RoundTrip", mock.Anything).
-		Run(func(args mock.Arguments) {
-			req, ok := args.Get(0).(*http.Request)
-			require.True(t, ok, "RoundTrip receives an *http.Request")
-			require.NotNil(t, req.Body, "the controller call carries a request body")
+	return captureRequest(t, canned, func(client *openai.Client) error {
+		_, err := client.Controller(context.Background(), instructions, input, nil)
 
-			raw, err := io.ReadAll(req.Body)
-			require.NoError(t, err)
-
-			body = raw
-		}).
-		Return(http.StatusOK, controllerResponseBody(t, openai.ControllerResponse{
-			Thinking: "done",
-			Code:     "",
-			Done:     true,
-		}), nil).
-		Once()
-
-	client := newControllerClient(t, transport, opts...)
-
-	_, err := client.Controller(context.Background(), instructions, input, nil)
-	require.NoError(t, err)
-
-	transport.AssertExpectations(t)
-	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
-
-	return body
+		return err
+	}, opts...)
 }
 
 func TestControllerRequestSendsModelEffortAndStrictSchema(t *testing.T) {
@@ -492,13 +523,7 @@ func TestControllerDecodesAnswerSplitAcrossTwoDeltas(t *testing.T) {
 	inner, err := json.Marshal(reply)
 	require.NoError(t, err)
 
-	transport := new(mockTransport)
-	transport.
-		On("RoundTrip", mock.Anything).
-		Return(http.StatusOK, completedStream(t, string(inner), string(inner)), nil).
-		Once()
-
-	client := newControllerClient(t, transport)
+	client, transport := newClientServing(t, http.StatusOK, completedStream(t, string(inner), string(inner)))
 
 	result, err := client.Controller(context.Background(), "system prompt", "USER: why did sshd fail?", nil)
 	require.NoError(t, err, "two concatenated objects must not fail the turn")
@@ -517,13 +542,7 @@ func TestControllerDecodesAnswerSplitAcrossTwoDeltas(t *testing.T) {
 func assertControllerTurnFails(t *testing.T, streamBody, wantCode string) {
 	t.Helper()
 
-	transport := new(mockTransport)
-	transport.
-		On("RoundTrip", mock.Anything).
-		Return(http.StatusOK, streamBody, nil).
-		Once()
-
-	client := newControllerClient(t, transport)
+	client, transport := newClientServing(t, http.StatusOK, streamBody)
 
 	result, err := client.Controller(context.Background(), "system prompt", "USER: why did sshd fail?", nil)
 	require.Error(t, err)
@@ -532,10 +551,7 @@ func assertControllerTurnFails(t *testing.T, streamBody, wantCode string) {
 		Response: openai.ControllerResponse{Thinking: "", Code: "", Done: false},
 	}, result, "a failed turn yields the zero result")
 
-	oopsErr, ok := oops.AsOops(err)
-	require.True(t, ok, "the error is oops-wrapped")
-	assert.Equal(t, "openai", oopsErr.Domain())
-	assert.Equal(t, wantCode, oopsErr.Code())
+	assertOpenAICode(t, err, wantCode)
 
 	transport.AssertExpectations(t)
 	transport.AssertNumberOfCalls(t, "RoundTrip", 1)

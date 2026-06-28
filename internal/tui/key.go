@@ -10,11 +10,9 @@ const keyCtrlR = "ctrl+r"
 
 // KeyEvent is a normalized terminal key event.
 type KeyEvent struct {
-	Key   string
-	Text  string
-	Ctrl  bool
-	Alt   bool
-	Shift bool
+	Key  string
+	Text string
+	Ctrl bool
 }
 
 // NewKeyEvent converts a tcell/v3 key event into a normalized key event.
@@ -33,16 +31,14 @@ func NewKeyEvent(event *tcell.EventKey) (KeyEvent, bool) {
 	}
 
 	return KeyEvent{
-		Key:   key,
-		Text:  "",
-		Ctrl:  strings.HasPrefix(key, "ctrl+") || event.Modifiers()&tcell.ModCtrl != 0,
-		Alt:   event.Modifiers()&tcell.ModAlt != 0,
-		Shift: strings.HasPrefix(key, "shift+") || event.Modifiers()&tcell.ModShift != 0,
+		Key:  key,
+		Text: "",
+		Ctrl: strings.HasPrefix(key, "ctrl+") || event.Modifiers()&tcell.ModCtrl != 0,
 	}, true
 }
 
 func emptyKeyEvent() KeyEvent {
-	return KeyEvent{Key: "", Text: "", Ctrl: false, Alt: false, Shift: false}
+	return KeyEvent{Key: "", Text: "", Ctrl: false}
 }
 
 func runeKeyEvent(event *tcell.EventKey) KeyEvent {
@@ -55,11 +51,9 @@ func runeKeyEvent(event *tcell.EventKey) KeyEvent {
 	}
 
 	return KeyEvent{
-		Key:   key,
-		Text:  text,
-		Ctrl:  ctrl,
-		Alt:   event.Modifiers()&tcell.ModAlt != 0,
-		Shift: event.Modifiers()&tcell.ModShift != 0,
+		Key:  key,
+		Text: text,
+		Ctrl: ctrl,
 	}
 }
 

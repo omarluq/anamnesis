@@ -4,13 +4,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/samber/oops"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/omarluq/anamnesis/internal/ana/journal"
 	"github.com/omarluq/anamnesis/internal/ana/repl"
+	"github.com/omarluq/anamnesis/internal/ana/repl/repltest"
 	"github.com/omarluq/anamnesis/internal/ana/systemd"
 )
 
@@ -47,12 +47,12 @@ func TestNewAssemblesSessionForMultiStepInvestigation(t *testing.T) {
 		authEntry("s=cursor-session-2", "Failed password for root", 3),
 	}
 
-	journalSurface := new(mockJournalSurface)
+	journalSurface := new(repltest.MockJournal)
 	journalSurface.On("Query", mock.MatchedBy(func(filter *journal.QueryFilter) bool {
 		return filter != nil && filter.Unit == unitSSH
 	})).Return(entries)
 
-	systemdSurface := new(mockSystemdSurface)
+	systemdSurface := new(repltest.MockSystemd)
 	systemdSurface.On("UnitStatus", unitSSH).Return(systemd.UnitStatus{
 		Name:        unitSSH,
 		Description: "OpenSSH server daemon",
@@ -118,7 +118,7 @@ func TestNewWiresSubLLMSeamAndFinalVar(t *testing.T) {
 	sub.On("Sub", "summarize ssh", "[evidence]").Return("ssh is degraded", nil)
 
 	cfg := repl.Config{
-		Host:   repl.HostDeps{Journal: new(mockJournalSurface), Systemd: new(mockSystemdSurface)},
+		Host:   repl.HostDeps{Journal: new(repltest.MockJournal), Systemd: new(repltest.MockSystemd)},
 		Sink:   new(mockCitationSink),
 		Sub:    sub,
 		Budget: fullBudget(),
@@ -148,7 +148,7 @@ agent.FINAL_VAR("summary")`
 // repl.New is forced down a single validate branch.
 func validSessionConfig() repl.Config {
 	return repl.Config{
-		Host:   repl.HostDeps{Journal: new(mockJournalSurface), Systemd: new(mockSystemdSurface)},
+		Host:   repl.HostDeps{Journal: new(repltest.MockJournal), Systemd: new(repltest.MockSystemd)},
 		Sink:   new(mockCitationSink),
 		Sub:    new(mockSubLLM),
 		Budget: fullBudget(),
@@ -165,11 +165,7 @@ func TestNewRejectsNilConfig(t *testing.T) {
 	require.Error(t, err)
 	require.Nil(t, session)
 
-	var oopsErr oops.OopsError
-
-	require.ErrorAs(t, err, &oopsErr)
-	assert.Equal(t, "repl", oopsErr.Domain())
-	assert.Equal(t, "session_config_nil", oopsErr.Code())
+	repltest.RequireOopsCode(t, err, "repl", "session_config_nil")
 }
 
 // TestNewRejectsUnsetCollaborator proves repl.New fails loudly when any collaborator
@@ -229,11 +225,7 @@ func TestNewRejectsUnsetCollaborator(t *testing.T) {
 			require.Error(t, err)
 			require.Nil(t, session)
 
-			var oopsErr oops.OopsError
-
-			require.ErrorAs(t, err, &oopsErr)
-			assert.Equal(t, "repl", oopsErr.Domain())
-			assert.Equal(t, testCase.code, oopsErr.Code())
+			repltest.RequireOopsCode(t, err, "repl", testCase.code)
 		})
 	}
 }

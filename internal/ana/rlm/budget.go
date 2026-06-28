@@ -13,15 +13,17 @@ import (
 const (
 	defaultMaxDepth    = 3
 	defaultMaxSubCalls = 60
-	// defaultPerEvalTimeout bounds a single controller eval — the model-generated Go
-	// runs synchronously through the mvm interpreter, which has no preemption of its
-	// own, so a model-emitted non-terminating loop would otherwise wedge the eval
-	// goroutine forever. It is the ONLY time bound left on a run: there is no wall-clock
-	// or turn budget, so an investigation runs until the model signals agent.FINAL (or
-	// the user quits); this per-eval cap is purely an anti-wedge safety for the
-	// non-preemptible interpreter, not an investigation budget. 10 minutes is generous:
-	// a legitimately slow turn is slow because of ctx-honoring network sub-calls, which
-	// it clears; a wedged loop does zero I/O, so the timeout caps it.
+	// defaultPerEvalTimeout is the idle-progress window for a single controller eval —
+	// the model-generated Go runs synchronously through the mvm interpreter, which has
+	// no preemption of its own, so a model-emitted non-terminating loop would otherwise
+	// wedge the eval goroutine forever. It is the ONLY time bound left on a run: there
+	// is no wall-clock or turn budget, so an investigation runs until the model signals
+	// agent.FINAL (or the user quits); this window is purely an anti-wedge safety for
+	// the non-preemptible interpreter, not an investigation budget. It bounds IDLE time,
+	// not total time: every sub-call, turn-start, and byte of stdout resets it, so a
+	// legitimately slow turn — a wide fan-out whose sub-calls are all advancing — runs
+	// as long as it keeps making progress, while a wedged loop does zero I/O and trips
+	// the window. 10 minutes of no progress whatsoever is the wedge threshold.
 	defaultPerEvalTimeout = 600 * time.Second
 )
 
@@ -35,9 +37,12 @@ var (
 // for turns, recursion depth, and sub-calls. The zero value is not usable;
 // construct one with NewBudget. A Budget must not be copied after first use.
 type Budget struct {
-	// PerEvalTimeout bounds a single eval of model-generated Go, so a non-terminating
-	// loop the interpreter cannot preempt is force-finished rather than hanging the
-	// session forever. It is the only time bound on a run. See defaultPerEvalTimeout.
+	// PerEvalTimeout is the idle-progress window for a single eval of model-generated
+	// Go: a turn that makes no progress for this long is force-finished, while a
+	// slow-but-advancing turn runs on. It bounds idle time, not total time, so a
+	// non-terminating loop the interpreter cannot preempt is still force-finished rather
+	// than hanging the session forever. It is the only time bound on a run. See
+	// defaultPerEvalTimeout.
 	PerEvalTimeout time.Duration
 	// MaxDepth bounds the agent.Query recursion depth.
 	MaxDepth int

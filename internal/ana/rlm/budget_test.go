@@ -5,10 +5,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/samber/oops"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/omarluq/anamnesis/internal/ana/repl/repltest"
 	"github.com/omarluq/anamnesis/internal/ana/rlm"
 )
 
@@ -49,10 +49,7 @@ func TestBudgetLimitSentinels(t *testing.T) {
 			err := testCase.consume(budget)
 			require.Error(t, err)
 
-			var oopsErr oops.OopsError
-
-			require.ErrorAs(t, err, &oopsErr)
-			assert.Equal(t, testCase.code, oopsErr.Code())
+			repltest.RequireOopsCode(t, err, "rlm", testCase.code)
 		})
 	}
 }
@@ -69,10 +66,7 @@ func TestBudgetDepthGaugeRecovers(t *testing.T) {
 	err := budget.EnterDepth()
 	require.Error(t, err)
 
-	var oopsErr oops.OopsError
-
-	require.ErrorAs(t, err, &oopsErr)
-	assert.Equal(t, "budget_depth_exceeded", oopsErr.Code())
+	repltest.RequireOopsCode(t, err, "rlm", "budget_depth_exceeded")
 
 	budget.ExitDepth()
 	assert.NoError(t, budget.EnterDepth())
@@ -104,6 +98,6 @@ func TestBudgetReserveSubCallConcurrent(t *testing.T) {
 
 	waitGroup.Wait()
 
-	assert.LessOrEqual(t, accepted.Load(), int64(budget.MaxSubCalls))
-	assert.Equal(t, int64(budget.MaxSubCalls), accepted.Load())
+	assert.Equal(t, int64(budget.MaxSubCalls), accepted.Load(),
+		"the reserve cap accepts exactly MaxSubCalls even under concurrent callers")
 }

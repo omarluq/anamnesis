@@ -21,8 +21,8 @@ type Unit struct {
 	SubState string
 }
 
-// UnitStatus is the detailed status of a single unit, as returned by Status. It
-// extends the listing fields with the main process identifier.
+// UnitStatus is the detailed status of a single unit, as returned by UnitStatus.
+// It extends the listing fields with the main process identifier.
 type UnitStatus struct {
 	// Name is the unit name, for example "nginx.service".
 	Name string

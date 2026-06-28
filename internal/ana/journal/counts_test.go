@@ -88,69 +88,62 @@ var countErrCases = []countErrCase{
 	{name: "unique_advance_failure", arrange: advanceFailFactory, invoke: invokeUnique},
 }
 
-func TestCountsTalliesUnitsScopedToCurrentBoot(t *testing.T) {
-	t.Parallel()
-
-	client := journal.NewClientWithFactory(newFixtureFactory(t), 1)
-
-	counts, err := client.Counts(bootCurrent, journal.FieldUnit)
-	require.NoError(t, err)
-	assert.Equal(t, map[string]int{
-		unitSSH:   2,
-		unitNginx: 1,
-		unitCron:  1,
-		unitOomd:  1,
-	}, counts)
-
-	require.NoError(t, client.Close())
+// countsByScopeCases drives Counts over the fixture across boot scope and tallied
+// field: an explicit boot id scopes the tally to that boot, and an empty id tallies
+// every boot. Each want map omits the empty-string key, so asserting equality also
+// proves the unitless kernel record is skipped rather than bucketed under "".
+var countsByScopeCases = []struct {
+	want    map[string]int
+	name    string
+	bootID  string
+	byField string
+}{
+	{
+		name:    "units_scoped_to_current_boot",
+		bootID:  bootCurrent,
+		byField: journal.FieldUnit,
+		want:    map[string]int{unitSSH: 2, unitNginx: 1, unitCron: 1, unitOomd: 1},
+	},
+	{
+		name:    "priorities_within_current_boot",
+		bootID:  bootCurrent,
+		byField: journal.FieldPriority,
+		want:    map[string]int{"3": 1, "4": 1, "5": 1, "6": 3},
+	},
+	{
+		name:    "units_in_first_boot",
+		bootID:  bootFirst,
+		byField: journal.FieldUnit,
+		want:    map[string]int{unitSSH: 1, unitCron: 1, unitOomd: 1},
+	},
+	{
+		name:    "units_in_second_boot",
+		bootID:  bootSecond,
+		byField: journal.FieldUnit,
+		want:    map[string]int{unitSSH: 1, unitNginx: 2, unitOomd: 1},
+	},
+	{
+		name:    "units_across_every_boot_skip_unitless_records",
+		bootID:  "",
+		byField: journal.FieldUnit,
+		want:    map[string]int{unitSSH: 4, unitNginx: 3, unitCron: 2, unitOomd: 3},
+	},
 }
 
-func TestCountsTalliesPrioritiesWithinBoot(t *testing.T) {
+func TestCountsTalliesByScope(t *testing.T) {
 	t.Parallel()
 
-	client := journal.NewClientWithFactory(newFixtureFactory(t), 1)
+	for _, testCase := range countsByScopeCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
 
-	counts, err := client.Counts(bootCurrent, journal.FieldPriority)
-	require.NoError(t, err)
-	assert.Equal(t, map[string]int{"3": 1, "4": 1, "5": 1, "6": 3}, counts)
+			client := newFixtureClient(t)
 
-	require.NoError(t, client.Close())
-}
-
-func TestCountsScopeIsolatesBoots(t *testing.T) {
-	t.Parallel()
-
-	client := journal.NewClientWithFactory(newFixtureFactory(t), 1)
-
-	first, err := client.Counts(bootFirst, journal.FieldUnit)
-	require.NoError(t, err)
-	assert.Equal(t, map[string]int{unitSSH: 1, unitCron: 1, unitOomd: 1}, first)
-
-	second, err := client.Counts(bootSecond, journal.FieldUnit)
-	require.NoError(t, err)
-	assert.Equal(t, map[string]int{unitSSH: 1, unitNginx: 2, unitOomd: 1}, second)
-
-	require.NoError(t, client.Close())
-}
-
-func TestCountsEmptyBootCountsEveryBootAndSkipsAbsentField(t *testing.T) {
-	t.Parallel()
-
-	client := journal.NewClientWithFactory(newFixtureFactory(t), 1)
-
-	counts, err := client.Counts("", journal.FieldUnit)
-	require.NoError(t, err)
-	// Every boot is tallied and the kernel record, which carries no _SYSTEMD_UNIT,
-	// is skipped rather than bucketed under the empty string.
-	assert.Equal(t, map[string]int{
-		unitSSH:   4,
-		unitNginx: 3,
-		unitCron:  2,
-		unitOomd:  3,
-	}, counts)
-	assert.NotContains(t, counts, "")
-
-	require.NoError(t, client.Close())
+			counts, err := client.Counts(testCase.bootID, testCase.byField)
+			require.NoError(t, err)
+			assert.Equal(t, testCase.want, counts)
+		})
+	}
 }
 
 func TestCountsScopesToBootViaMatch(t *testing.T) {
@@ -161,10 +154,7 @@ func TestCountsScopesToBootViaMatch(t *testing.T) {
 	reader.On("SeekHead").Return(nil)
 	reader.On("Next").Return(uint64(0), nil)
 
-	factory := new(mockFactory)
-	factory.On("NewReader").Return(reader, nil).Once()
-
-	client := journal.NewClientWithFactory(factory, 1)
+	client, factory := clientWithReader(t, reader, 1)
 
 	counts, err := client.Counts(bootCurrent, journal.FieldUnit)
 	require.NoError(t, err)
@@ -173,7 +163,6 @@ func TestCountsScopesToBootViaMatch(t *testing.T) {
 	reader.AssertCalled(t, "AddMatch", journal.FieldBootID+"="+bootCurrent)
 	reader.AssertNumberOfCalls(t, "AddMatch", 1)
 
-	require.NoError(t, client.Close())
 	factory.AssertExpectations(t)
 }
 
@@ -184,10 +173,7 @@ func TestCountsEmptyBootAddsNoMatch(t *testing.T) {
 	reader.On("SeekHead").Return(nil)
 	reader.On("Next").Return(uint64(0), nil)
 
-	factory := new(mockFactory)
-	factory.On("NewReader").Return(reader, nil).Once()
-
-	client := journal.NewClientWithFactory(factory, 1)
+	client, factory := clientWithReader(t, reader, 1)
 
 	counts, err := client.Counts("", journal.FieldUnit)
 	require.NoError(t, err)
@@ -195,86 +181,73 @@ func TestCountsEmptyBootAddsNoMatch(t *testing.T) {
 
 	reader.AssertNotCalled(t, "AddMatch", mock.Anything)
 
-	require.NoError(t, client.Close())
 	factory.AssertExpectations(t)
 }
 
-func TestUniqueReturnsSortedDistinctUnits(t *testing.T) {
-	t.Parallel()
-
-	client := journal.NewClientWithFactory(newFixtureFactory(t), 1)
-
-	filter := zeroFilter()
-
-	values, err := client.Unique(journal.FieldUnit, &filter)
-	require.NoError(t, err)
-	assert.Equal(t, []string{unitCron, unitNginx, unitSSH, unitOomd}, values)
-
-	require.NoError(t, client.Close())
+// uniqueByFilterCases drives Unique over the fixture across the field enumerated
+// and the filter that scopes the scan, so the boot-scope, grep and process-name
+// behaviors read as one table. Each want slice is the ascending distinct set the
+// scoped scan yields.
+var uniqueByFilterCases = []struct {
+	adjust func(filter *journal.QueryFilter)
+	name   string
+	field  string
+	want   []string
+}{
+	{
+		name:   "sorted_distinct_units",
+		field:  journal.FieldUnit,
+		adjust: func(_ *journal.QueryFilter) {},
+		want:   []string{unitCron, unitNginx, unitSSH, unitOomd},
+	},
+	{
+		// The oldest boot lacks nginx, so scoping by BootID drops it from the set.
+		name:   "units_scoped_to_filter_boot",
+		field:  journal.FieldUnit,
+		adjust: func(filter *journal.QueryFilter) { filter.BootID = bootFirst },
+		want:   []string{unitCron, unitSSH, unitOomd},
+	},
+	{
+		// Only systemd-oomd logs the memory-pressure message, so the in-Go Grep
+		// predicate narrows the distinct units to that one unit.
+		name:   "units_narrowed_by_grep_predicate",
+		field:  journal.FieldUnit,
+		adjust: func(filter *journal.QueryFilter) { filter.Grep = "memory pressure" },
+		want:   []string{unitOomd},
+	},
+	{
+		name:   "distinct_priorities_in_boot",
+		field:  journal.FieldPriority,
+		adjust: func(filter *journal.QueryFilter) { filter.BootID = bootCurrent },
+		want:   []string{"3", "4", "5", "6"},
+	},
+	{
+		// _COMM is present on every record, including the kernel entry that has no
+		// unit, so the distinct set spans all five process names.
+		name:   "every_process_comm",
+		field:  journal.FieldComm,
+		adjust: func(_ *journal.QueryFilter) {},
+		want:   []string{"cron", "kernel", "nginx", "sshd", "systemd-oomd"},
+	},
 }
 
-func TestUniqueScopesToFilterBoot(t *testing.T) {
+func TestUniqueByFilter(t *testing.T) {
 	t.Parallel()
 
-	client := journal.NewClientWithFactory(newFixtureFactory(t), 1)
+	for _, testCase := range uniqueByFilterCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
 
-	filter := zeroFilter()
-	filter.BootID = bootFirst
+			client := newFixtureClient(t)
 
-	values, err := client.Unique(journal.FieldUnit, &filter)
-	require.NoError(t, err)
-	// The oldest boot lacks nginx, so scoping by BootID drops it from the set.
-	assert.Equal(t, []string{unitCron, unitSSH, unitOomd}, values)
+			filter := zeroFilter()
+			testCase.adjust(&filter)
 
-	require.NoError(t, client.Close())
-}
-
-func TestUniqueHonorsGrepPredicate(t *testing.T) {
-	t.Parallel()
-
-	client := journal.NewClientWithFactory(newFixtureFactory(t), 1)
-
-	filter := zeroFilter()
-	filter.Grep = "memory pressure"
-
-	values, err := client.Unique(journal.FieldUnit, &filter)
-	require.NoError(t, err)
-	// Only systemd-oomd logs the memory-pressure message, so the in-Go Grep
-	// predicate narrows the distinct units to that one unit.
-	assert.Equal(t, []string{unitOomd}, values)
-
-	require.NoError(t, client.Close())
-}
-
-func TestUniqueDistinctPrioritiesInBoot(t *testing.T) {
-	t.Parallel()
-
-	client := journal.NewClientWithFactory(newFixtureFactory(t), 1)
-
-	filter := zeroFilter()
-	filter.BootID = bootCurrent
-
-	values, err := client.Unique(journal.FieldPriority, &filter)
-	require.NoError(t, err)
-	assert.Equal(t, []string{"3", "4", "5", "6"}, values)
-
-	require.NoError(t, client.Close())
-}
-
-func TestUniqueSpansEveryProcessComm(t *testing.T) {
-	t.Parallel()
-
-	client := journal.NewClientWithFactory(newFixtureFactory(t), 1)
-
-	filter := zeroFilter()
-
-	values, err := client.Unique(journal.FieldComm, &filter)
-	require.NoError(t, err)
-	// _COMM is present on every record, including the kernel entry that has no
-	// unit, so the distinct set spans all five process names.
-	assert.Equal(t, []string{"cron", "kernel", "nginx", "sshd", "systemd-oomd"}, values)
-
-	require.NoError(t, client.Close())
+			values, err := client.Unique(testCase.field, &filter)
+			require.NoError(t, err)
+			assert.Equal(t, testCase.want, values)
+		})
+	}
 }
 
 func TestCountsAndUniquePropagateReaderErrors(t *testing.T) {
@@ -291,7 +264,6 @@ func TestCountsAndUniquePropagateReaderErrors(t *testing.T) {
 			assert.Nil(t, value)
 			require.ErrorIs(t, err, assert.AnError)
 
-			require.NoError(t, client.Close())
 			factory.AssertExpectations(t)
 		})
 	}

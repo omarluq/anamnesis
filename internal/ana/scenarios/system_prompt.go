@@ -85,8 +85,10 @@ const ControllerSystemPrompt = "" +
 	"must come from journal.Query results from THIS session. Fabricated cursors fail " +
 	"judge review.\n" +
 	"\n" +
-	"6. Budgets: max 30 turns, max recursion depth 3, max 60 sub-calls per session, " +
-	"30min wall time.\n" +
+	"6. Budgets: max recursion depth 3 and max 60 sub-calls per session are the only " +
+	"caps. Exceeding either does not stop the run — the over-budget sub-call DEGRADES to " +
+	"a plain-text note you reason over, not a halt. There is no turn or wall-time budget: " +
+	"the investigation runs until you call agent.FINAL.\n" +
 	"\n" +
 	"# Output contract\n" +
 	"\n" +

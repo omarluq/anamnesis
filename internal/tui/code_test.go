@@ -10,20 +10,7 @@ import (
 )
 
 func lineText(lines []tui.Line) string {
-	texts := make([]string, 0, len(lines))
-	for _, line := range lines {
-		texts = append(texts, line.Text)
-	}
-
-	return strings.Join(texts, "\n")
-}
-
-func assertContains(t *testing.T, text, want string) {
-	t.Helper()
-
-	if !strings.Contains(text, want) {
-		t.Fatalf("rendered text missing %q:\n%s", want, text)
-	}
+	return strings.Join(lineTexts(lines), "\n")
 }
 
 func assertNoLineWiderThan(t *testing.T, lines []tui.Line, width int) {

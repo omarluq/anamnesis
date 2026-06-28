@@ -12,9 +12,9 @@ import (
 
 	"github.com/omarluq/anamnesis/internal/ana/journal"
 	"github.com/omarluq/anamnesis/internal/ana/repl"
+	"github.com/omarluq/anamnesis/internal/ana/repl/repltest"
 	"github.com/omarluq/anamnesis/internal/ana/rlm"
 	"github.com/omarluq/anamnesis/internal/ana/scenarios"
-	"github.com/omarluq/anamnesis/internal/ana/systemd"
 	"github.com/omarluq/anamnesis/internal/openai"
 	"github.com/omarluq/anamnesis/internal/terminal"
 )
@@ -41,105 +41,6 @@ func citableEntry(cursor string) journal.Entry {
 // full buffer.
 const investigateTraceBuffer = 32
 
-// mockJournalHost is a testify mock of the repl.Journal host surface the assembled
-// investigation exposes to interpreted code. Investigate decorates it with the
-// visibility recorder, so this mock scripts only the raw query results.
-type mockJournalHost struct {
-	mock.Mock
-}
-
-// Boots replays the []journal.BootInfo scripted via .On("Boots").Return(boots).
-func (m *mockJournalHost) Boots() []journal.BootInfo {
-	args := m.Called()
-
-	boots, ok := args.Get(0).([]journal.BootInfo)
-	if !ok {
-		return nil
-	}
-
-	return boots
-}
-
-// Query records filter and replays the []journal.Entry scripted via
-// .On("Query", filter).Return(entries).
-func (m *mockJournalHost) Query(filter *journal.QueryFilter) []journal.Entry {
-	args := m.Called(filter)
-
-	entries, ok := args.Get(0).([]journal.Entry)
-	if !ok {
-		return nil
-	}
-
-	return entries
-}
-
-// Counts records its arguments and replays the histogram scripted via
-// .On("Counts", bootID, byField).Return(counts).
-func (m *mockJournalHost) Counts(bootID, byField string) map[string]int {
-	args := m.Called(bootID, byField)
-
-	counts, ok := args.Get(0).(map[string]int)
-	if !ok {
-		return nil
-	}
-
-	return counts
-}
-
-// Unique records its arguments and replays the values scripted via
-// .On("Unique", field, filter).Return(values).
-func (m *mockJournalHost) Unique(field string, filter *journal.QueryFilter) []string {
-	args := m.Called(field, filter)
-
-	values, ok := args.Get(0).([]string)
-	if !ok {
-		return nil
-	}
-
-	return values
-}
-
-// mockSystemdHost is a testify mock of the repl.Systemd host surface. The assembled
-// investigation requires a non-nil surface even when a run never reads systemd, so
-// it stands in unprogrammed for the journal-only scenarios.
-type mockSystemdHost struct {
-	mock.Mock
-}
-
-// UnitStatus records name and replays the systemd.UnitStatus scripted via
-// .On("UnitStatus", name).Return(status).
-func (m *mockSystemdHost) UnitStatus(name string) systemd.UnitStatus {
-	args := m.Called(name)
-
-	status, ok := args.Get(0).(systemd.UnitStatus)
-	if !ok {
-		var zero systemd.UnitStatus
-
-		return zero
-	}
-
-	return status
-}
-
-// ListUnits records state and replays the []systemd.Unit scripted via
-// .On("ListUnits", state).Return(units).
-func (m *mockSystemdHost) ListUnits(state string) []systemd.Unit {
-	args := m.Called(state)
-
-	units, ok := args.Get(0).([]systemd.Unit)
-	if !ok {
-		return nil
-	}
-
-	return units
-}
-
-// Compile-time assertions that the mocks satisfy the host surfaces they double.
-var (
-	_ repl.Journal = (*mockJournalHost)(nil)
-	_ repl.Systemd = (*mockSystemdHost)(nil)
-)
-
 // TestInvestigateRunsTwoTurnInvestigation is the RLM-12 acceptance test: it drives
 // rlm.Investigate through a two-turn investigation assembled entirely from mock
 // model seams and mock host surfaces over a real interpreter, citation store, and
@@ -164,8 +65,8 @@ func TestInvestigateRunsTwoTurnInvestigation(t *testing.T) {
 	controllerLLM := new(mockControllerLLM)
 	sub := new(mockSubLLM)
 	judge := new(mockJudger)
-	journalHost := new(mockJournalHost)
-	systemdHost := new(mockSystemdHost)
+	journalHost := new(repltest.MockJournal)
+	systemdHost := new(repltest.MockSystemd)
 	events := make(chan terminal.TraceEvent, investigateTraceBuffer)
 
 	queryCode := "entries := journal.Query(&journal.QueryFilter{Unit: \"checkout-api.service\"})\n" +
@@ -230,8 +131,8 @@ func TestInvestigateSurfacesControllerFailure(t *testing.T) {
 		Controller:  controllerLLM,
 		Sub:         new(mockSubLLM),
 		Judge:       new(mockJudger),
-		Journal:     new(mockJournalHost),
-		Systemd:     new(mockSystemdHost),
+		Journal:     new(repltest.MockJournal),
+		Systemd:     new(repltest.MockSystemd),
 		Events:      events,
 		RunID:       fixtureRunID,
 		MaxDepth:    0,

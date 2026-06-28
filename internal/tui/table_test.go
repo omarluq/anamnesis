@@ -50,7 +50,7 @@ func TestTableRenderAlignmentClippingAndDraw(t *testing.T) {
 	require.Contains(t, strings.Join(lineTexts(centered), "\n"), " x ")
 
 	buffer := tui.NewCellBuffer(24, 6, tcell.StyleDefault)
-	table.Draw(buffer, testRect(0, 24, 6))
+	tui.DrawLines(buffer, testRect(0, 24, 6), table.Render(24, 6))
 	require.Equal(t, '╭', buffer.Cell(0, 0).Rune)
 }
 

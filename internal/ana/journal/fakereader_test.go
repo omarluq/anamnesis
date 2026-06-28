@@ -28,7 +28,6 @@ const (
 	sshRecordCount     = 4
 	bootCurrentCount   = 6
 	sshInCurrentCount  = 2
-	sshOrNginxCount    = 7
 )
 
 // Field values reused across the match scenarios; declared once so the scenarios
@@ -39,9 +38,9 @@ const (
 	bootCurrent = "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
 )
 
-// matchGroup is one term of the journald match expression: a set of
-// "FIELD=value" constraints. Matches on the same field OR together; matches on
-// different fields AND together within the group.
+// matchGroup is the set of "FIELD=value" constraints of a journald match
+// expression: matches on the same field OR together; matches on different fields
+// AND together.
 type matchGroup struct {
 	byField map[string][]string
 }
@@ -53,12 +52,12 @@ func newMatchGroup() matchGroup {
 
 // fixtureReader is a real, fixture-backed journal.Reader: it replays the decoded
 // records of a stored journalctl JSON export and applies journald's match algebra
-// (AddMatch/AddDisjunction) over them, so the Client and host surface can be
-// exercised without cgo or a live journal. It performs genuine filtering; it is
-// not a stand-in test double.
+// (AddMatch) over them, so the Client and host surface can be exercised without
+// cgo or a live journal. It performs genuine filtering; it is not a stand-in test
+// double.
 type fixtureReader struct {
 	records  []map[string]any
-	groups   []matchGroup
+	group    matchGroup
 	filtered []map[string]any
 	pos      int
 }
@@ -68,31 +67,22 @@ type fixtureReader struct {
 func newFixtureReader(records []map[string]any) *fixtureReader {
 	return &fixtureReader{
 		records:  records,
-		groups:   []matchGroup{newMatchGroup()},
+		group:    newMatchGroup(),
 		filtered: nil,
 		pos:      -1,
 	}
 }
 
-// AddMatch adds a "FIELD=value" exact-match constraint to the current match
-// group, OR-ing it with any prior matches on the same field. A match missing the
-// "=" separator is rejected.
+// AddMatch adds a "FIELD=value" exact-match constraint to the active query,
+// OR-ing it with any prior matches on the same field. A match missing the "="
+// separator is rejected.
 func (reader *fixtureReader) AddMatch(match string) error {
 	field, value, found := strings.Cut(match, "=")
 	if !found {
 		return oops.In("journal").Code("invalid_match").Errorf("match %q is not in FIELD=value form", match)
 	}
 
-	group := reader.groups[len(reader.groups)-1]
-	group.byField[field] = append(group.byField[field], value)
-
-	return nil
-}
-
-// AddDisjunction starts a fresh match group so subsequent matches are OR-ed with
-// the matches added so far, mirroring sd_journal_add_disjunction.
-func (reader *fixtureReader) AddDisjunction() error {
-	reader.groups = append(reader.groups, newMatchGroup())
+	reader.group.byField[field] = append(reader.group.byField[field], value)
 
 	return nil
 }
@@ -126,8 +116,8 @@ func (reader *fixtureReader) Next() (uint64, error) {
 	return 1, nil
 }
 
-// Fields returns the raw field map of the record at the cursor, ready to decode
-// with journal.DecodeFields. It errors when no record is current.
+// Fields returns the raw field map of the record at the cursor. It errors when no
+// record is current.
 func (reader *fixtureReader) Fields() (map[string]any, error) {
 	if reader.pos < 0 || reader.pos >= len(reader.filtered) {
 		return nil, oops.In("journal").
@@ -141,7 +131,7 @@ func (reader *fixtureReader) Fields() (map[string]any, error) {
 // FlushMatches drops every match and clears the materialized set so a pooled
 // reader starts its next query clean.
 func (reader *fixtureReader) FlushMatches() {
-	reader.groups = []matchGroup{newMatchGroup()}
+	reader.group = newMatchGroup()
 	reader.filtered = nil
 	reader.pos = -1
 }
@@ -155,24 +145,14 @@ func (reader *fixtureReader) Close() error {
 	return nil
 }
 
-// matches reports whether record satisfies the active query: true when it matches
-// any non-empty group, or when no constraint has been added at all.
+// matches reports whether record satisfies the active query: true when it
+// satisfies every field constraint, or when no constraint has been added at all.
 func (reader *fixtureReader) matches(record map[string]any) bool {
-	constrained := false
-
-	for _, group := range reader.groups {
-		if len(group.byField) == 0 {
-			continue
-		}
-
-		constrained = true
-
-		if groupMatches(group, record) {
-			return true
-		}
+	if len(reader.group.byField) == 0 {
+		return true
 	}
 
-	return !constrained
+	return groupMatches(reader.group, record)
 }
 
 // groupMatches reports whether record satisfies every field constraint in group,
@@ -257,14 +237,16 @@ func parseNDJSON(t *testing.T, data []byte) []map[string]any {
 	return records
 }
 
-// walk drives reader through SeekHead and Next, decoding each matching record
-// into an Entry via the JNL-02 parser exposed as journal.DecodeFields.
-func walk(t *testing.T, reader journal.Reader) []journal.Entry {
+// matchedRecords drives reader through SeekHead and Next and returns the raw field
+// maps of the records the active query matched, so a self-test can assert the
+// fixtureReader filtered to the right records — by count and by raw field — without
+// a decode seam. The end-to-end decode path is covered through Client.Query.
+func matchedRecords(t *testing.T, reader journal.Reader) []map[string]any {
 	t.Helper()
 
 	require.NoError(t, reader.SeekHead())
 
-	entries := make([]journal.Entry, 0)
+	records := make([]map[string]any, 0)
 
 	for {
 		advanced, err := reader.Next()
@@ -277,10 +259,34 @@ func walk(t *testing.T, reader journal.Reader) []journal.Entry {
 		fields, err := reader.Fields()
 		require.NoError(t, err)
 
-		entries = append(entries, journal.DecodeFields(fields))
+		records = append(records, fields)
 	}
 
-	return entries
+	return records
+}
+
+// newFixtureClient builds a pooled journal.Client backed by the shared fixture
+// factory — the setup nearly every fixture-driven test shares — keeping a single
+// idle Reader since the tests borrow one Reader at a time. The Client needs no
+// teardown: it holds no OS handle and the fixture Readers carry none, so the
+// caller just lets it fall out of scope.
+func newFixtureClient(t *testing.T) *journal.Client {
+	t.Helper()
+
+	return journal.NewClientWithFactory(newFixtureFactory(t), 1)
+}
+
+// clientWithReader builds a pooled journal.Client whose mock factory hands out
+// reader exactly once, the single-mock-reader setup the behavioral and
+// error-propagation tests share. It returns the factory too so a caller can assert
+// the pool opened exactly one Reader.
+func clientWithReader(t *testing.T, reader journal.Reader, maxIdle int) (*journal.Client, *mockFactory) {
+	t.Helper()
+
+	factory := new(mockFactory)
+	factory.On("NewReader").Return(reader, nil).Once()
+
+	return journal.NewClientWithFactory(factory, maxIdle), factory
 }
 
 // matchCase drives one filtering scenario through the fixture reader. configure
@@ -329,23 +335,6 @@ var matchCases = []matchCase{
 		wantCount: sshInCurrentCount,
 	},
 	{
-		name: "disjunction_ors_the_groups",
-		configure: func(reader *fixtureReader) error {
-			if err := reader.AddMatch(journal.FieldUnit + "=" + unitSSH); err != nil {
-				return err
-			}
-
-			if err := reader.AddDisjunction(); err != nil {
-				return err
-			}
-
-			return reader.AddMatch(journal.FieldUnit + "=" + unitNginx)
-		},
-		wantBoot:  "",
-		wantUnits: []string{unitSSH, unitNginx},
-		wantCount: sshOrNginxCount,
-	},
-	{
 		name: "no_match_returns_every_record",
 		configure: func(_ *fixtureReader) error {
 			return nil
@@ -385,39 +374,41 @@ func TestFixtureReaderHonorsMatches(t *testing.T) {
 			reader := newFixtureReader(records)
 			require.NoError(t, testCase.configure(reader))
 
-			entries := walk(t, reader)
-			assert.Len(t, entries, testCase.wantCount)
+			matched := matchedRecords(t, reader)
+			assert.Len(t, matched, testCase.wantCount)
 
-			assertEntriesMatch(t, entries, testCase)
+			assertRecordsMatch(t, matched, testCase)
 		})
 	}
 }
 
-// assertEntriesMatch checks every returned entry against the scenario invariants,
-// proving the matches filtered by field rather than returning arbitrary records.
-func assertEntriesMatch(t *testing.T, entries []journal.Entry, testCase matchCase) {
+// assertRecordsMatch checks every matched record against the scenario invariants,
+// reading the raw _SYSTEMD_UNIT and _BOOT_ID fields so the check proves the matches
+// filtered by field rather than returning arbitrary records.
+func assertRecordsMatch(t *testing.T, records []map[string]any, testCase matchCase) {
 	t.Helper()
 
-	for index := range entries {
-		entry := &entries[index]
-
+	for _, record := range records {
 		if len(testCase.wantUnits) > 0 {
-			assert.Contains(t, testCase.wantUnits, entry.Unit)
+			assert.Contains(t, testCase.wantUnits, recordField(record, journal.FieldUnit))
 		}
 
 		if testCase.wantBoot != "" {
-			assert.Equal(t, testCase.wantBoot, entry.BootID)
+			assert.Equal(t, testCase.wantBoot, recordField(record, journal.FieldBootID))
 		}
 	}
 }
 
-func TestFixtureReaderDecodesEntriesViaParser(t *testing.T) {
+func TestFixtureQueryDecodesEntriesViaParser(t *testing.T) {
 	t.Parallel()
 
-	reader := newFixtureReader(loadFixture(t))
-	require.NoError(t, reader.AddMatch(journal.FieldUnit+"="+unitSSH))
+	client := newFixtureClient(t)
 
-	entries := walk(t, reader)
+	filter := zeroFilter()
+	filter.Unit = unitSSH
+
+	entries, err := client.Query(&filter)
+	require.NoError(t, err)
 	require.Len(t, entries, sshRecordCount)
 
 	first := entries[0]
@@ -434,15 +425,13 @@ func TestFixtureReaderDecodesEntriesViaParser(t *testing.T) {
 func TestFixtureReaderServesClientPool(t *testing.T) {
 	t.Parallel()
 
-	factory := newFixtureFactory(t)
-	client := journal.NewClientWithFactory(factory, 1)
+	client := newFixtureClient(t)
 
 	first, err := client.Acquire()
 	require.NoError(t, err)
 	require.NoError(t, first.AddMatch(journal.FieldUnit+"="+unitSSH))
 
-	entries := walk(t, first)
-	assert.Len(t, entries, sshRecordCount)
+	assert.Len(t, matchedRecords(t, first), sshRecordCount)
 
 	require.NoError(t, client.Release(first))
 
@@ -450,9 +439,7 @@ func TestFixtureReaderServesClientPool(t *testing.T) {
 	require.NoError(t, err)
 	assert.Same(t, first, second, "the pool reuses the flushed reader")
 
-	rest := walk(t, second)
-	assert.Len(t, rest, fixtureRecordCount)
+	assert.Len(t, matchedRecords(t, second), fixtureRecordCount)
 
 	require.NoError(t, client.Release(second))
-	require.NoError(t, client.Close())
 }

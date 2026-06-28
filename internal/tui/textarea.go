@@ -8,31 +8,16 @@ import (
 
 // TextArea is an editable multiline text buffer.
 type TextArea struct {
-	Metadata map[string]any
-	Text     string
-	Label    string
-	Chars    []string
-	Cursor   int
+	Text   string
+	Cursor int
 }
 
 // NewTextArea returns an initialized empty text area.
 func NewTextArea() TextArea {
 	return TextArea{
-		Metadata: map[string]any{},
-		Text:     "",
-		Label:    "",
-		Chars:    []string{},
-		Cursor:   0,
+		Text:   "",
+		Cursor: 0,
 	}
-}
-
-// TextValue returns the current text.
-func (area *TextArea) TextValue() string {
-	if area == nil {
-		return ""
-	}
-
-	return area.Text
 }
 
 // Empty reports whether the text is empty.
@@ -47,7 +32,6 @@ func (area *TextArea) SetRunes(value []rune, cursor int) {
 	}
 
 	area.Text = string(value)
-	area.Chars = Chars(value)
 	area.Cursor = ClampCursor(cursor, len(value))
 }
 
@@ -120,19 +104,19 @@ const (
 // Render renders this text area with a border.
 func (area *TextArea) Render(width, maxRows int, styles TextAreaStyles) TextAreaRender {
 	if area == nil {
-		return renderTextArea(nil, 0, width, maxRows, styles, "")
+		return renderTextArea(nil, 0, width, maxRows, styles)
 	}
 
-	return renderTextArea([]rune(area.Text), area.Cursor, width, maxRows, styles, area.Label)
+	return renderTextArea([]rune(area.Text), area.Cursor, width, maxRows, styles)
 }
 
-func renderTextArea(value []rune, cursor, width, maxRows int, styles TextAreaStyles, label string) TextAreaRender {
+func renderTextArea(value []rune, cursor, width, maxRows int, styles TextAreaStyles) TextAreaRender {
 	innerWidth := max(1, width-textAreaBorderPadding)
 	bodyLines := TextAreaBodyLines(value, innerWidth)
 	cursorRow, cursorColumn := TextAreaCursorPosition(value, cursor, innerWidth)
 	visibleLines, skippedRows := VisibleLines(bodyLines, maxRows, cursorRow)
 	lines := make([]Line, 0, len(visibleLines)+textAreaBorderRows)
-	lines = append(lines, NewLine(styles.Border, TopBorder(width, label)))
+	lines = append(lines, NewLine(styles.Border, TopBorder(width, "")))
 
 	for _, bodyLine := range visibleLines {
 		bodyText := PadRight(bodyLine, innerWidth)
@@ -195,16 +179,6 @@ func VisibleLines(lines []string, maxRows, cursorRow int) (visible []string, ski
 	}
 
 	return lines[start : start+maxRows], start
-}
-
-// Chars converts runes into string cells.
-func Chars(value []rune) []string {
-	chars := make([]string, 0, len(value))
-	for _, char := range value {
-		chars = append(chars, string(char))
-	}
-
-	return chars
 }
 
 // ClampCursor clamps a rune cursor to the text length.

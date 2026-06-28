@@ -31,29 +31,28 @@ const (
 )
 
 // chatMessage is one entry in the scrolling transcript: a role plus its rendered
-// content. Query blocks (RoleToolResult) and per-turn code blocks
-// (RoleBashExecution) additionally carry their recursion Depth for indentation and a
-// Pending flag toggled between a start event (TraceKindQueryStart / TraceKindCodeStart)
-// and its matching end (TraceKindQueryEnd / TraceKindCodeEnd). A query block also
-// carries the QueryID its start event minted, so completeQuery settles an end onto
-// its own start even when parallel fan-out completes out of order; non-query blocks
-// leave it 0. A query or code block also keeps its raw Args — the agent.Query prompt
-// or the turn's Go source — so completeQuery and completeCode re-render the settled
-// block from that stored payload instead of parsing it back out of the already-rendered
-// Content, which is ambiguous when the prompt or code contains a line that looks like a
-// wire-format section marker (output:, error:, details:); other blocks leave it empty.
+// content. Query blocks (RoleToolResult) and per-turn code blocks (RoleBashExecution)
+// carry a Pending flag toggled between a start event (TraceKindQueryStart /
+// TraceKindCodeStart) and its matching end (TraceKindQueryEnd / TraceKindCodeEnd). A
+// query block also carries the QueryID its start event minted, so completeQuery settles
+// an end onto its own start even when parallel fan-out completes out of order; non-query
+// blocks leave it 0. A query or code block also keeps its raw Args — the agent.Query
+// prompt or the turn's Go source — so completeQuery and completeCode re-render the
+// settled block from that stored payload instead of parsing it back out of the
+// already-rendered Content, which is ambiguous when the prompt or code contains a line
+// that looks like a wire-format section marker (output:, error:, details:); other blocks
+// leave it empty.
 type chatMessage struct {
 	Role    transcript.Role
 	Content string
 	Args    string
 	QueryID uint64
-	Depth   int
 	Pending bool
 }
 
 // newChatMessage builds a settled, top-level message of role carrying content.
 func newChatMessage(role transcript.Role, content string) chatMessage {
-	return chatMessage{Role: role, Content: content, Args: "", QueryID: 0, Depth: 0, Pending: false}
+	return chatMessage{Role: role, Content: content, Args: "", QueryID: 0, Pending: false}
 }
 
 // appendUser appends the user's submitted prompt as a user message and returns
@@ -108,7 +107,6 @@ func (app *App) appendThinkingDelta(delta string) {
 		Content: delta,
 		Args:    "",
 		QueryID: 0,
-		Depth:   0,
 		Pending: true,
 	})
 }
@@ -134,25 +132,23 @@ func (app *App) settleThinking(text string) {
 }
 
 // appendQueryStart opens a pending query block for recursive agent.Query sub-call
-// queryID, carrying prompt at the given recursion depth. The id is stored so
-// completeQuery settles this block's own end rather than the newest pending block at
-// its depth.
-func (app *App) appendQueryStart(queryID uint64, prompt string, depth int) {
+// queryID, carrying prompt. The id is stored so completeQuery settles this block's own
+// end rather than the newest pending block, even when parallel fan-out completes out of
+// order.
+func (app *App) appendQueryStart(queryID uint64, prompt string) {
 	app.history = append(app.history, chatMessage{
 		Role:    transcript.RoleToolResult,
 		Content: queryContent(prompt, ""),
 		Args:    prompt,
 		QueryID: queryID,
-		Depth:   depth,
 		Pending: true,
 	})
 }
 
 // completeQuery fills the pending query block carrying queryID with result, settling
-// it. Matching by QueryID — not by depth and recency — pairs each end with its own
-// start even when parallel fan-out at one depth completes out of order; depth is kept
-// only for indentation. A QueryEnd with no matching open block is ignored so a stray
-// end event cannot corrupt the transcript.
+// it. Matching by QueryID — not by recency — pairs each end with its own start even when
+// parallel fan-out completes out of order. A QueryEnd with no matching open block is
+// ignored so a stray end event cannot corrupt the transcript.
 func (app *App) completeQuery(queryID uint64, result string) {
 	for index, message := range slices.Backward(app.history) {
 		if !message.Pending || message.Role != transcript.RoleToolResult || message.QueryID != queryID {
@@ -164,7 +160,6 @@ func (app *App) completeQuery(queryID uint64, result string) {
 			Content: queryContent(message.Args, result),
 			Args:    message.Args,
 			QueryID: queryID,
-			Depth:   message.Depth,
 			Pending: false,
 		}
 
@@ -196,7 +191,6 @@ func toolEventContent(name, args, result string) string {
 		DetailsJSON:   "",
 		Result:        result,
 		Error:         "",
-		IsError:       false,
 	})
 }
 
@@ -210,7 +204,6 @@ func (app *App) appendCodeStart(code string) {
 		Content: codeContent(code, "", ""),
 		Args:    code,
 		QueryID: 0,
-		Depth:   0,
 		Pending: true,
 	})
 }
@@ -230,7 +223,6 @@ func (app *App) completeCode(output, errText string) {
 			Content: codeContent(message.Args, output, errText),
 			Args:    message.Args,
 			QueryID: 0,
-			Depth:   0,
 			Pending: false,
 		}
 
@@ -248,7 +240,6 @@ func (app *App) appendJudgeStart(_ string) {
 		Content: judgeContent(judgeArgs, ""),
 		Args:    judgeArgs,
 		QueryID: 0,
-		Depth:   0,
 		Pending: true,
 	})
 }
@@ -279,7 +270,6 @@ func (app *App) completeJudge(critique string) {
 			Content: judgeContent(judgeArgs, output),
 			Args:    judgeArgs,
 			QueryID: 0,
-			Depth:   0,
 			Pending: false,
 		}
 
@@ -348,6 +338,5 @@ func codeContent(code, output, errText string) string {
 		DetailsJSON:   "",
 		Result:        output,
 		Error:         errText,
-		IsError:       errText != "",
 	})
 }

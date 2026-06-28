@@ -15,11 +15,19 @@ func TestSetDefaults(t *testing.T) {
 	viperInstance := viper.New()
 	setDefaults(viperInstance)
 
-	assert.Equal(t, "ana", viperInstance.GetString("app.name"))
-	assert.Equal(t, "development", viperInstance.GetString("app.env"))
-	assert.Equal(t, "info", viperInstance.GetString("logging.level"))
-	assert.Equal(t, "pretty", viperInstance.GetString("logging.format"))
-	assert.Equal(t, "medium", viperInstance.GetString("reasoning.controller"))
-	assert.Equal(t, "low", viperInstance.GetString("reasoning.sub"))
-	assert.Equal(t, "medium", viperInstance.GetString("reasoning.judge"))
+	defaults := []struct {
+		key  string
+		want string
+	}{
+		{key: "app.name", want: "ana"},
+		{key: "app.env", want: "development"},
+		{key: "logging.level", want: "info"},
+		{key: "logging.format", want: "pretty"},
+		{key: "reasoning.controller", want: effortMedium},
+		{key: "reasoning.sub", want: effortLow},
+		{key: "reasoning.judge", want: effortMedium},
+	}
+	for _, testCase := range defaults {
+		assert.Equal(t, testCase.want, viperInstance.GetString(testCase.key), testCase.key)
+	}
 }

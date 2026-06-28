@@ -19,11 +19,13 @@ const (
 	keyAppEnv    = "app.env"
 	keyLogLevel  = "logging.level"
 	keyLogFormat = "logging.format"
+	keyLogFile   = "logging.file"
 
 	valAppName     = "ana"
 	valAppEnv      = "production"
 	valLogLevel    = "info"
 	valLogFormat   = "json"
+	valLogFile     = "/var/log/ana.log"
 	envDevelopment = "development"
 
 	keyReasoningController = "reasoning.controller"
@@ -105,7 +107,7 @@ func TestConfigEntries(t *testing.T) {
 
 	cfg := &config.Config{
 		App:     config.AppConfig{Name: valAppName, Env: valAppEnv},
-		Logging: config.LoggingConfig{Level: valLogLevel, Format: valLogFormat, File: ""},
+		Logging: config.LoggingConfig{Level: valLogLevel, Format: valLogFormat, File: valLogFile},
 		Reasoning: config.ReasoningConfig{
 			Controller: valReasoningController,
 			Sub:        valReasoningSub,
@@ -122,6 +124,7 @@ func TestConfigEntries(t *testing.T) {
 		keyAppEnv:              valAppEnv,
 		keyLogLevel:            valLogLevel,
 		keyLogFormat:           valLogFormat,
+		keyLogFile:             valLogFile,
 		keyReasoningController: valReasoningController,
 		keyReasoningSub:        valReasoningSub,
 		keyReasoningJudge:      valReasoningJudge,

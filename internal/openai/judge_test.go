@@ -3,13 +3,10 @@ package openai_test
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"testing"
 
-	"github.com/samber/oops"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/omarluq/anamnesis/internal/openai"
@@ -29,39 +26,45 @@ func judgeResponseBody(t *testing.T, verdict openai.JudgeVerdict) string {
 	return completedStream(t, string(inner))
 }
 
-// captureJudgeRequest drives one Judge call through a mock transport that records
-// the outgoing request body during RoundTrip, returning that raw body so a test
-// can assert on what actually went over the wire (model id, the framed input).
+// captureJudgeRequest drives one Judge call through captureRequest with a canned
+// approving verdict, returning the raw outgoing request body so a test can assert on
+// what actually went over the wire (model id, the framed input).
 func captureJudgeRequest(t *testing.T, question, answer string, citations []string) []byte {
 	t.Helper()
 
-	var body []byte
+	canned := judgeResponseBody(t, openai.JudgeVerdict{Approve: true, Critique: ""})
 
-	transport := new(mockTransport)
-	transport.
-		On("RoundTrip", mock.Anything).
-		Run(func(args mock.Arguments) {
-			req, ok := args.Get(0).(*http.Request)
-			require.True(t, ok, "RoundTrip receives an *http.Request")
-			require.NotNil(t, req.Body, "the judge call carries a request body")
+	return captureRequest(t, canned, func(client *openai.Client) error {
+		_, err := client.Judge(context.Background(), question, answer, citations)
 
-			raw, err := io.ReadAll(req.Body)
-			require.NoError(t, err)
+		return err
+	})
+}
 
-			body = raw
-		}).
-		Return(http.StatusOK, judgeResponseBody(t, openai.JudgeVerdict{Approve: true, Critique: ""}), nil).
-		Once()
+// assertJudgeTurnFails drives one Judge call whose streamed response is streamBody
+// and asserts the pass fails with the zero result under wantCode — the mirror of
+// assertControllerTurnFails for the judge role.
+func assertJudgeTurnFails(t *testing.T, streamBody, wantCode string) {
+	t.Helper()
 
-	client := newControllerClient(t, transport)
+	client, transport := newClientServing(t, http.StatusOK, streamBody)
 
-	_, err := client.Judge(context.Background(), question, answer, citations)
-	require.NoError(t, err)
+	result, err := client.Judge(
+		context.Background(),
+		"Why did nginx fail to start?",
+		"nginx died because its configuration was invalid.",
+		[]string{"nginx.service: invalid configuration directive"},
+	)
+	require.Error(t, err)
+
+	assert.Equal(t, openai.JudgeResult{
+		Verdict: openai.JudgeVerdict{Approve: false, Critique: ""},
+	}, result, "a failed judge pass yields the zero result")
+
+	assertOpenAICode(t, err, wantCode)
 
 	transport.AssertExpectations(t)
 	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
-
-	return body
 }
 
 func TestJudgeReturnsCritiqueVerdict(t *testing.T) {
@@ -72,13 +75,7 @@ func TestJudgeReturnsCritiqueVerdict(t *testing.T) {
 		Critique: "The claim that the kernel ran out of memory is unsupported by any cited entry.",
 	}
 
-	transport := new(mockTransport)
-	transport.
-		On("RoundTrip", mock.Anything).
-		Return(http.StatusOK, judgeResponseBody(t, verdict), nil).
-		Once()
-
-	client := newControllerClient(t, transport)
+	client, transport := newClientServing(t, http.StatusOK, judgeResponseBody(t, verdict))
 
 	result, err := client.Judge(
 		context.Background(),
@@ -101,13 +98,7 @@ func TestJudgeApprovesWithEmptyCritique(t *testing.T) {
 
 	verdict := openai.JudgeVerdict{Approve: true, Critique: ""}
 
-	transport := new(mockTransport)
-	transport.
-		On("RoundTrip", mock.Anything).
-		Return(http.StatusOK, judgeResponseBody(t, verdict), nil).
-		Once()
-
-	client := newControllerClient(t, transport)
+	client, transport := newClientServing(t, http.StatusOK, judgeResponseBody(t, verdict))
 
 	result, err := client.Judge(
 		context.Background(),
@@ -167,13 +158,7 @@ func TestJudgeHandlesAnswerWithNoCitations(t *testing.T) {
 		Critique: "The answer cites no journal entries, so every claim is ungrounded.",
 	}
 
-	transport := new(mockTransport)
-	transport.
-		On("RoundTrip", mock.Anything).
-		Return(http.StatusOK, judgeResponseBody(t, verdict), nil).
-		Once()
-
-	client := newControllerClient(t, transport)
+	client, transport := newClientServing(t, http.StatusOK, judgeResponseBody(t, verdict))
 
 	result, err := client.Judge(
 		context.Background(),
@@ -193,36 +178,19 @@ func TestJudgeHandlesAnswerWithNoCitations(t *testing.T) {
 func TestJudgeSurfacesCallFailure(t *testing.T) {
 	t.Parallel()
 
-	const errorBody = `{"error":{"message":"The model gpt-5.5 does not exist or you do not have access to it.",` +
-		`"type":"invalid_request_error","param":null,"code":"model_not_found"}}`
+	assertModelNotFoundSurface(t, "judge_call_failed", func(client *openai.Client) error {
+		result, err := client.Judge(
+			context.Background(),
+			"Why did nginx fail to start?",
+			"nginx died because its configuration was invalid.",
+			[]string{"nginx.service: invalid configuration directive"},
+		)
+		assert.Equal(t, openai.JudgeResult{
+			Verdict: openai.JudgeVerdict{Approve: false, Critique: ""},
+		}, result, "a failed judge call yields the zero result")
 
-	transport := new(mockTransport)
-	transport.
-		On("RoundTrip", mock.Anything).
-		Return(http.StatusNotFound, errorBody, nil).
-		Once()
-
-	client := newControllerClient(t, transport)
-
-	result, err := client.Judge(
-		context.Background(),
-		"Why did nginx fail to start?",
-		"nginx died because its configuration was invalid.",
-		[]string{"nginx.service: invalid configuration directive"},
-	)
-	require.Error(t, err)
-
-	assert.Equal(t, openai.JudgeResult{
-		Verdict: openai.JudgeVerdict{Approve: false, Critique: ""},
-	}, result, "a failed judge call yields the zero result")
-
-	oopsErr, ok := oops.AsOops(err)
-	require.True(t, ok, "the error is oops-wrapped")
-	assert.Equal(t, "openai", oopsErr.Domain())
-	assert.Equal(t, "judge_call_failed", oopsErr.Code())
-
-	transport.AssertExpectations(t)
-	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
+		return err
+	})
 }
 
 func TestJudgeSurfacesIncompleteTruncationError(t *testing.T) {
@@ -232,64 +200,13 @@ func TestJudgeSurfacesIncompleteTruncationError(t *testing.T) {
 	// a verdict could truncate before its JSON closed and decode to a cryptic
 	// "unexpected EOF". The judge had no incomplete guard. Streaming adds the shared
 	// guard, so a terminal response.incomplete now surfaces as judge_incomplete.
-	transport := new(mockTransport)
-	transport.
-		On("RoundTrip", mock.Anything).
-		Return(http.StatusOK, incompleteStream(t, `{"approve":fal`), nil).
-		Once()
-
-	client := newControllerClient(t, transport)
-
-	result, err := client.Judge(
-		context.Background(),
-		"Why did nginx fail to start?",
-		"nginx died because its configuration was invalid.",
-		[]string{"nginx.service: invalid configuration directive"},
-	)
-	require.Error(t, err)
-
-	assert.Equal(t, openai.JudgeResult{
-		Verdict: openai.JudgeVerdict{Approve: false, Critique: ""},
-	}, result, "a truncated verdict yields the zero result")
-
-	oopsErr, ok := oops.AsOops(err)
-	require.True(t, ok, "the error is oops-wrapped")
-	assert.Equal(t, "openai", oopsErr.Domain())
-	assert.Equal(t, "judge_incomplete", oopsErr.Code(),
-		"a truncated verdict surfaces as judge_incomplete, not a cryptic decode EOF")
-
-	transport.AssertExpectations(t)
-	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
+	assertJudgeTurnFails(t, incompleteStream(t, `{"approve":fal`), "judge_incomplete")
 }
 
 func TestJudgeSurfacesDecodeFailure(t *testing.T) {
 	t.Parallel()
 
-	transport := new(mockTransport)
-	transport.
-		On("RoundTrip", mock.Anything).
-		Return(http.StatusOK, completedStream(t, "this is prose, not a JudgeVerdict JSON object"), nil).
-		Once()
-
-	client := newControllerClient(t, transport)
-
-	result, err := client.Judge(
-		context.Background(),
-		"What killed the database process?",
-		"postgres was OOM-killed under memory pressure.",
-		[]string{"postgres.service: out of memory, killed process 4242"},
-	)
-	require.Error(t, err)
-
-	assert.Equal(t, openai.JudgeResult{
-		Verdict: openai.JudgeVerdict{Approve: false, Critique: ""},
-	}, result, "a verdict that fails to decode yields the zero result")
-
-	oopsErr, ok := oops.AsOops(err)
-	require.True(t, ok, "the error is oops-wrapped")
-	assert.Equal(t, "openai", oopsErr.Domain())
-	assert.Equal(t, "judge_decode", oopsErr.Code())
-
-	transport.AssertExpectations(t)
-	transport.AssertNumberOfCalls(t, "RoundTrip", 1)
+	// A completed reply whose accumulated output_text is prose, not a JudgeVerdict
+	// JSON object, surfaces as an openai-domain judge_decode failure.
+	assertJudgeTurnFails(t, completedStream(t, "this is prose, not a JudgeVerdict JSON object"), "judge_decode")
 }
