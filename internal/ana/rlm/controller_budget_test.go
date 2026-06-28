@@ -126,9 +126,12 @@ func TestControllerRunRecoversOverBudgetQueryPanic(t *testing.T) {
 // multi-turn force-finish run can emit a turn event per recorded turn without the
 // emitter blocking on a full buffer, and returns the wide channel to drain.
 func widenTrace(fixture *sessionFixture) chan terminal.TraceEvent {
-	const traceBuffer = 64
+	// One buffer slot per recorded turn (the loop emits a single Turn event per
+	// turn) plus one slot of headroom, so Emitter.Turn never blocks before
+	// drainTrace runs, and the buffer scales with the fixture's MaxTurns budget.
+	buffer := fixture.session.Budget.MaxTurns + 1
 
-	events := make(chan terminal.TraceEvent, traceBuffer)
+	events := make(chan terminal.TraceEvent, buffer)
 	fixture.session.Emitter = rlm.NewEmitter(events, fixtureRunID)
 
 	return events
