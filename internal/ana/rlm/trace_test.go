@@ -3,6 +3,7 @@ package rlm_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -98,6 +99,34 @@ func TestEmitterCarriesQueryDepth(t *testing.T) {
 	assert.Equal(t, 2, got[2].Depth)
 	assert.Equal(t, terminal.TraceKindQueryEnd, got[3].Kind)
 	assert.Equal(t, 1, got[3].Depth)
+}
+
+// TestEmitterAbandonsBlockedSendOnCancel exercises the cancel-safe send path: a
+// send that blocks on an undrained trace channel must return once the run context
+// is canceled, so a stalled UI consumer (or the §6 wall-clock deadline) unblocks
+// the emitter instead of wedging the run on a full channel.
+func TestEmitterAbandonsBlockedSendOnCancel(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	events := make(chan terminal.TraceEvent)
+	emitter := rlm.NewEmitter(ctx, events, 1)
+
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		emitter.Thinking("blocked")
+	}()
+
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("emitter send stayed blocked after context cancellation")
+	}
 }
 
 func TestEmitterTagsDistinctRunIDs(t *testing.T) {
