@@ -7,279 +7,323 @@
   <br/>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=flat&labelColor=24292e&logo=opensourceinitiative&logoColor=white" alt="License: MIT"></a>
   <a href="https://github.com/omarluq/anamnesis/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/omarluq/anamnesis/ci.yml?style=flat&labelColor=24292e&label=Tests&logo=github&logoColor=white" alt="Tests"></a>
-  <a href="https://github.com/omarluq/anamnesis/releases"><img src="https://img.shields.io/github/v/release/omarluq/anamnesis?style=flat&labelColor=24292e&color=28a745&label=Version&logo=semver&logoColor=white" alt="Version"></a>
-  <a href="https://deepwiki.com/omarluq/anamnesis"><img src="https://img.shields.io/badge/DeepWiki-omarluq%2Fog--template-4c72c9?style=flat&labelColor=24292e&logo=data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACwAAAAyCAYAAAAnWDnqAAAAAXNSR0IArs4c6QAAA05JREFUaEPtmUtyEzEQhtWTQyQLHNak2AB7ZnyXZMEjXMGeK/AIi+QuHrMnbChYY7MIh8g01fJoopFb0uhhEqqcbWTp06/uv1saEDv4O3n3dV60RfP947Mm9/SQc0ICFQgzfc4CYZoTPAswgSJCCUJUnAAoRHOAUOcATwbmVLWdGoH//PB8mnKqScAhsD0kYP3j/Yt5LPQe2KvcXmGvRHcDnpxfL2zOYJ1mFwrryWTz0advv1Ut4CJgf5uhDuDj5eUcAUoahrdY/56ebRWeraTjMt/00Sh3UDtjgHtQNHwcRGOC98BJEAEymycmYcWwOprTgcB6VZ5JK5TAJ+fXGLBm3FDAmn6oPPjR4rKCAoJCal2eAiQp2x0vxTPB3ALO2CRkwmDy5WohzBDwSEFKRwPbknEggCPB/imwrycgxX2NzoMCHhPkDwqYMr9tRcP5qNrMZHkVnOjRMWwLCcr8ohBVb1OMjxLwGCvjTikrsBOiA6fNyCrm8V1rP93iVPpwaE+gO0SsWmPiXB+jikdf6SizrT5qKasx5j8ABbHpFTx+vFXp9EnYQmLx02h1QTTrl6eDqxLnGjporxl3NL3agEvXdT0WmEost648sQOYAeJS9Q7bfUVoMGnjo4AZdUMQku50McDcMWcBPvr0SzbTAFDfvJqwLzgxwATnCgnp4wDl6Aa+Ax283gghmj+vj7feE2KBBRMW3FzOpLOADl0Isb5587h/U4gGvkt5v60Z1VLG8BhYjbzRwyQZemwAd6cCR5/XFWLYZRIMpX39AR0tjaGGiGzLVyhse5C9RKC6ai42ppWPKiBagOvaYk8lO7DajerabOZP46Lby5wKjw1HCRx7p9sVMOWGzb/vA1hwiWc6jm3MvQDTogQkiqIhJV0nBQBTU+3okKCFDy9WwferkHjtxib7t3xIUQtHxnIwtx4mpg26/HfwVNVDb4oI9RHmx5WGelRVlrtiw43zboCLaxv46AZeB3IlTkwouebTr1y2NjSpHz68WNFjHvupy3q8TFn3Hos2IAk4Ju5dCo8B3wP7VPr/FGaKiG+T+v+TQqIrOqMTL1VdWV1DdmcbO8KXBz6esmYWYKPwDL5b5FA1a0hwapHiom0r/cKaoqr+27/XcrS5UwSMbQAAAABJRU5ErkJggg==&logoColor=white" alt="DeepWiki"></a>
-  <a href="https://github.com/omarluq/anamnesis"><img src="https://img.shields.io/badge/Made%20with-Love-ff69b4?style=flat&labelColor=24292e&logo=githubsponsors&logoColor=white" alt="Made with Love"></a>
+  <a href="https://mise.jdx.dev"><img src="https://img.shields.io/badge/built%20with-mise%20%2B%20task-7c3aed?style=flat&labelColor=24292e" alt="mise + task"></a>
 </p>
 
-## What's Included
+anamnesis _(/ˌanəmˈnēsəs/, Greek for "remembrance", a calling-to-mind [^1])_
 
-| Category       | Tool                                                                                                                   |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| **CLI**        | [Cobra](https://github.com/spf13/cobra) + [Fang v2](https://charm.land/fang) (styled help, manpages, completions)      |
-| **Config**     | [Viper](https://github.com/spf13/viper) (YAML + env vars + defaults)                                                   |
-| **DI**         | [samber/do v2](https://github.com/samber/do) (lazy dependency injection)                                               |
-| **Functional** | [samber/lo](https://github.com/samber/lo) (map, filter, reduce)                                                        |
-| **Monads**     | [samber/mo](https://github.com/samber/mo) (Option, Result, Either)                                                     |
-| **Errors**     | [samber/oops](https://github.com/samber/oops) (structured errors with context)                                         |
-| **Logging**    | [zerolog](https://github.com/rs/zerolog) + [slog-zerolog](https://github.com/samber/slog-zerolog) bridge               |
-| **Testing**    | [testify](https://github.com/stretchr/testify) (assert + require)                                                      |
-| **Linting**    | [golangci-lint v2](https://golangci-lint.run/) (50+ linters, strict config)                                            |
-| **Tasks**      | [Task](https://taskfile.dev/) (build, test, lint, ci)                                                                  |
-| **Tools**      | [mise](https://mise.jdx.dev/) (Go, Task, golangci-lint, lefthook versions)                                             |
-| **Hooks**      | [Lefthook](https://github.com/evilmartians/lefthook) (pre-commit, pre-push, conventional commits)                      |
-| **Release**    | [GoReleaser v2](https://goreleaser.com/) (cross-compile, checksums, changelog)                                         |
-| **CI/CD**      | GitHub Actions (lint + test + build matrix + release)                                                                  |
-| **Deps**       | [Renovate](https://docs.renovatebot.com/) (automated dependency updates)                                               |
-| **AI Skills**  | [cc-skills-golang](https://github.com/samber/cc-skills-golang) (opinionated agentic coding skills in `.agents/`)       |
-| **Init**       | [huh](https://charm.land/huh/v2) + [lipgloss](https://charm.land/lipgloss) (interactive project setup via `task init`) |
+> Ask your Linux box, in plain English, what went wrong, and watch an agent
+> investigate the journal the way an SRE would.
 
-## Quick Start
+## What it is
 
-### Use this template
+`anamnesis` is a single static binary, `ana`. You run `ana`, type a question
+(_"what was wrong with my box around 09:00 this morning?"_), and an agent investigates
+your live `journald` end to end.
 
-Click **"Use this template"** on GitHub, then:
+The twist is _how_ it reads the journal. It never dumps the log firehose into a model's
+context window. Instead, a **controller model writes Go**, that Go runs inside an embedded
+interpreter against a tiny host API (`journal.*`, `systemd.*`, `agent.*`), and the model
+only ever sees the **structured results its own code produced**. When a slice of the
+journal is too noisy to reason over directly, the code hands it to a **bounded sub-LLM
+call**, which can itself spin up a deeper investigation. When the controller is ready it
+emits a **cited `FINAL` answer**, and a separate **judge** model audits that answer
+against its evidence before it's allowed to render.
+
+The whole thing is live in a terminal UI. You watch the generated Go, the interpreter's
+output, the sub-call fan-out, and a running token/cost meter, turn by turn, as the
+investigation unfolds.
+
+## Why journald + RLM + Go
+
+There are a few opinions baked into this, and the combination is really the point.
+
+It starts with journald, which is the richest pile of signal on a Linux box, and almost
+nobody reads it directly. A single boot can be hundreds of megabytes of _structured_
+records, each one tagged with the boot it came from (`_BOOT_ID`), the unit that wrote it
+(`_SYSTEMD_UNIT`), a priority, a stable cursor (`__CURSOR`), a real timestamp. Most tools
+only ever see logs _after_ they've left the box and been flattened into plain lines. The
+good stuff is still sitting on the host.
+
+Now try to point an LLM at it and the obvious approaches fall over. Paste a boot into the
+context window and it [rots](https://research.trychroma.com/context-rot) before the model
+gets anywhere. Chunk it for RAG and you shred the very thing that makes journald useful:
+the boot boundaries, the links between units, the priority levels, the order of events.
+Hand the model a shell and let it grep around, and it just burns tokens wandering with no
+real plan.
+
+A Recursive Language Model fits the shape of the problem. Instead of stuffing the data into
+the prompt, you treat it as something out in the world that the model reaches through code.
+The model writes Go, the Go pokes at the journal, and only the small structured result
+comes back. anamnesis does this with `agent.Query(prompt, ctx)` and `agent.QueryBatched`.
+Being honest about it, this is bounded, depth-limited fan-out of smaller LLM calls rather
+than a true recursive REPL, but it keeps the part that matters: breaking a big problem down
+without drowning the model in raw logs.
+
+And it had to be Go. journald is a Linux thing and the tooling around it is mostly Go, so
+the code the controller writes should be Go too. `ana` runs that code through
+[mvm](https://github.com/mvm-sh/mvm), a small Go interpreter, because it compiles and runs
+fresh Go on every single turn, which puts interpreter speed right on the hot path. mvm is
+still alpha, and that's on purpose: this is about showing the right shape, not shipping a
+bulletproof sandbox.
+
+## How it works
+
+Three layers, each with one job. The **terminal** watches; the **controller** thinks; the
+**interpreter** runs code. The model never touches the journal directly, and the
+interpreter never knows there's a model.
+
+```mermaid
+flowchart TB
+    user([You: a plain-English question])
+
+    subgraph tui["the terminal UI"]
+        shell["chat · live trace · cost panes"]
+    end
+
+    subgraph ctl["internal/ana/rlm — the controller"]
+        loop["turn loop: ask, run, observe<br/>runs until agent.FINAL"]
+        judge["judge gate: audit the answer,<br/>allow one revision"]
+    end
+
+    subgraph repl["internal/ana/repl — embedded mvm interpreter"]
+        interp["runs the controller's generated Go<br/>state persists across turns"]
+    end
+
+    subgraph host["the host surface (all the code can touch)"]
+        journal["journal.* — libsystemd reader (cgo)"]
+        systemd["systemd.* — unit status (dbus)"]
+        agent["agent.Query / QueryBatched / Cite / FINAL"]
+    end
+
+    model["internal/openai — gpt-5.5<br/>controller · sub · judge roles"]
+
+    user --> shell
+    shell -->|query| loop
+    loop <-->|"what Go to run next"| model
+    loop -->|eval| interp
+    interp --> journal & systemd
+    interp -->|"noisy slice, summarize it"| agent
+    agent -->|"flat call or deeper loop"| model
+    loop --> judge
+    judge <--> model
+    judge -->|cited FINAL answer| shell
+    loop -.->|trace events| shell
+```
+
+### The controller loop
+
+Each turn, the controller shows the model the framed history so far and asks for the next
+chunk of Go. It runs that Go through the interpreter, captures a **bounded** view of what
+the code printed and returned, and folds _only that_ back into the next turn's context.
+That bounded re-entry is the whole point. It's what stops a 200-megabyte boot from ever
+reaching the model. The loop ends when the model calls `agent.FINAL` (or `agent.FINAL_VAR`
+to return a REPL variable).
+
+There is **no turn budget and no wall-clock deadline**. A healthy investigation runs until
+the model is genuinely done. The only guards are structural: recursion depth and total
+sub-call count are capped so fan-out can't run away, and a single per-eval timeout catches
+a non-terminating generated loop (the interpreter can't be preempted, so a runaway
+`for {}` would otherwise hang).
+
+```mermaid
+sequenceDiagram
+    participant C as Controller
+    participant M as gpt-5.5 (controller)
+    participant I as mvm interpreter
+    participant H as journal / systemd
+    participant J as gpt-5.5 (judge)
+
+    loop until agent.FINAL
+        C->>M: framed history, "what Go next?"
+        M-->>C: Go source (reasoning + code)
+        C->>I: eval the Go
+        I->>H: journal.Query / Counts / systemd.UnitStatus
+        H-->>I: structured results
+        I-->>C: bounded stdout + return value
+        Note over C: only the bounded result re-enters context
+    end
+    C->>J: audit the FINAL answer against its citations
+    alt grounded
+        J-->>C: approve, then render
+    else critique
+        J-->>C: one revision pass, then render
+    end
+```
+
+### Recursion and fan-out
+
+When the controller's Go hits something it shouldn't reason over line by line (a whole
+unit's history, every boot in a window, a wide error histogram), it delegates with
+`agent.Query(prompt, ctx)` or `agent.QueryBatched`. Each sub-call either resolves as a
+**flat summary** (at the deepest level) or spins up a **whole child controller loop** one
+level down, which can fan out again. Every node shares one tree-wide budget, so the
+breadth and depth stay bounded no matter how the model decomposes the problem.
+
+```mermaid
+flowchart TB
+    code["controller Go calls<br/>agent.Query(prompt, ctx)"]
+    code --> guard{"depth left?<br/>sub-calls left?"}
+    guard -->|"at max depth"| flat["flat sub-LLM call<br/>summarize ctx into a short answer"]
+    guard -->|"can recurse"| child["child controller loop<br/>one level deeper"]
+    child -->|"its own turns"| again["…can fan out again"]
+    guard -->|"budget spent"| degrade["graceful 'sub-investigation skipped'<br/>text, the run continues"]
+    flat --> splice["reply spliced back<br/>into the parent's Go"]
+    child --> splice
+    again -.-> splice
+```
+
+### Trace and render
+
+The controller emits a stream of trace events: thinking, code start/end, each sub-call's
+start/end, the judge's verdict, the final answer. The terminal is a **passive observer**:
+it drains those events off a channel and never blocks the controller. A small forwarding
+pump owns the channel lifecycle, so a sub-call still finishing after the run ends can't
+crash the UI; its late event just lands as a no-op. That's why you can watch a deep
+fan-out render in real time without the investigation ever stalling on the renderer.
+
+## Requirements
+
+anamnesis is **Linux-only by definition** and needs **cgo** for the `sdjournal` binding.
+You need Go **1.26+**, a C toolchain, and the systemd development headers:
 
 ```bash
-git clone git@github.com:yourname/yourproject.git
-cd yourproject
+# Debian / Ubuntu
+sudo apt install libsystemd-dev pkg-config gcc
+
+# Fedora
+sudo dnf install systemd-devel pkg-config gcc
+
+# Arch
+sudo pacman -S systemd pkg-config gcc   # headers ship with systemd
 ```
 
-### Initialize your project
+Two run-time requirements:
 
-Run the interactive init task to rename module, binary, and env prefix:
+- The running user must be in the **`systemd-journal`** group to read the journal
+  (`sudo usermod -aG systemd-journal "$USER"`, then re-login).
+- An **`OPENAI_API_KEY`** with **gpt-5.5** access. anamnesis uses `gpt-5.5` for every role
+  (controller, sub, and judge) with **no fallback**: if the key lacks access it fails
+  loudly rather than silently downgrading.
+
+`cgo` is needed for the journal reader only; the `systemd` unit-status path is pure Go via
+dbus. Cross-compilation is a non-goal.
+
+## Quickstart
 
 ```bash
-mise install          # Install Go, Task, golangci-lint, lefthook
-task init             # Rename + deps + git hooks
-task ci               # Verify everything works
+git clone https://github.com/omarluq/anamnesis
+cd anamnesis
+mise install                       # optional: pinned Go / Task / golangci-lint
+export OPENAI_API_KEY=sk-...        # must have gpt-5.5 access
+
+mise exec -- task run               # build ./bin/ana and launch it
 ```
 
-`task init` uses [huh](https://charm.land/huh/v2) to prompt for your module path, binary name, env prefix, and which AI coding assistant harnesses to enable (`.adal`, `.augment`, `.claude`, etc.). For each selected harness, it creates symlinks from `.<harness>/skills/` into `.agents/skills/`. After setup, it rewrites all files, renames `cmd/ana/`, runs `go mod tidy`, downloads deps, installs git hooks, and cleans up after itself (removes `cmd/init/` and the init task from `Taskfile.yml`).
+`task run` builds the binary and drops you straight into the interactive TUI against the
+real controller. Then just ask it something:
 
-## Project Structure
+> What was wrong with my box around 09:00 this morning?
 
-```
-.
-├── .agents/skills/       # AI coding skills (cc-skills-golang, symlinked per harness)
-├── cmd/ana/            # CLI entrypoint and commands
-│   ├── main.go           #   fang.Execute with signal handling
-│   ├── root.go           #   Root cobra command
-│   ├── config.go         #   config show/validate commands
-│   └── version.go        #   version command
-├── internal/
-│   ├── config/           # Viper config loading + validation
-│   │   ├── config.go     #   Config struct + Validate()
-│   │   └── loader.go     #   Load() returns mo.Result[*Config]
-│   ├── di/               # samber/do dependency injection
-│   │   ├── container.go  #   Root container with oops errors
-│   │   ├── register.go   #   Service registration
-│   │   ├── config_service.go
-│   │   └── logger_service.go  # zerolog + slog bridge
-│   └── vinfo/            # Build version metadata (ldflags)
-├── .github/workflows/
-│   ├── ci.yml            # Lint + test + cross-platform build
-│   └── release.yml       # GoReleaser on tag push
-├── Taskfile.yml          # build, test, lint, fmt, ci, clean, init
-├── .golangci.yml         # 50+ linters, strict settings
-├── .goreleaser.yaml      # Cross-compile + changelog + archives
-├── .mise.toml            # Pinned tool versions
-├── lefthook.yml          # Pre-commit, pre-push, conventional commits
-└── config.example.yaml   # Example configuration
-```
+Inside the chat, **`ctrl+o`** expands the code and `agent.Query` blocks so you can watch
+the decomposition, and **`ctrl+c`** quits.
 
-## Tasks
+## Example investigations
+
+`ana` is at its best on questions where the recursive decomposition is _obvious_ in the
+trace pane:
+
+1. **Single-boot triage.** _"What was wrong with my box around 09:00 this morning?"_ It
+   finds the current boot's noisiest units, drills into the worst ones around the window,
+   and cites the load-bearing entries. _(one level of fan-out)_
+2. **Boot diff.** _"Compare this boot to the previous one and tell me what's different."_
+   It enumerates the units in each boot, diffs the sets in Go, summarizes each boot's
+   health **in parallel**, and composes the delta, which is the boot-boundary reasoning
+   RAG shreds. _(the deepest shape)_
+3. **Cross-boot unit history.** _"Did the ssh service do anything weird this week?"_ It
+   walks every boot in the window, summarizes `ssh.service` per boot in parallel, and
+   synthesizes longitudinally.
+
+## Configuration
+
+anamnesis reads config in order from `--config <path>`, `ANAMNESIS_*` environment
+variables, a config file, then built-in defaults. See
+[`config.example.yaml`](config.example.yaml) for every key, and inspect the resolved
+config (with the env var for each key) any time:
 
 ```bash
-task              # List all tasks
-task init         # Rename + deps + hooks (first-time only)
-task build        # Build binary with ldflags
-task run          # Build and run
-task test         # Run tests with race detector
-task test-short   # Run short tests only
-task test-coverage # Tests + coverage HTML report
-task lint         # golangci-lint
-task fmt          # golangci-lint --fix
-task ci           # fmt + lint + test + build
-task deps         # Download dependencies
-task tidy         # go mod tidy
-task clean        # Remove all artifacts and caches
+ana config show
+ana config validate
 ```
 
-## Opinions & How Things Work
+The knob you'll reach for most is **reasoning effort**, set per role. Maximum effort makes
+each turn take minutes and tends to over-deliberate; the defaults trade some of that for
+turns that actually finish:
 
-### CLI: Fang v2 + Cobra
+| Key                    | Env var                          | Default  | Role                             |
+| ---------------------- | -------------------------------- | -------- | -------------------------------- |
+| `reasoning.controller` | `ANAMNESIS_REASONING_CONTROLLER` | `medium` | the per-turn investigation brain |
+| `reasoning.sub`        | `ANAMNESIS_REASONING_SUB`        | `low`    | bounded, high-volume sub-calls   |
+| `reasoning.judge`      | `ANAMNESIS_REASONING_JUDGE`      | `medium` | the post-answer audit            |
 
-The CLI uses [Cobra](https://github.com/spf13/cobra) for command structure and [Fang v2](https://charm.land/fang) as a wrapper that adds styled help pages, automatic `--version` flag, manpage generation via a hidden `man` subcommand, and shell completions out of the box.
+Each accepts `none`, `minimal`, `low`, `medium`, `high`, or `xhigh` (case-insensitive),
+validated at load. Want deeper reasoning at the cost of latency? Run
+`ANAMNESIS_REASONING_CONTROLLER=high ana`.
 
-Entry point (`cmd/ana/main.go`):
+Run logs go to `~/.local/state/ana/ana.log` by default, one structured line per
+investigation start/end, turn, sub-call, and force-finish. It's handy when you want to see
+exactly how a run spent its turns.
 
-- Sets up signal handling (`SIGINT`, `SIGTERM`)
-- Calls `fang.Execute()` which wraps the root Cobra command
-- Returns exit code 1 on error, 0 on success
-
-### Configuration: Viper + mo.Result
-
-Configuration loads from multiple sources with this precedence:
-
-1. `--config` CLI flag (explicit path)
-2. Environment variables prefixed with `ANAMNESIS_` (e.g. `ANAMNESIS_APP_NAME`, `ANAMNESIS_LOGGING_LEVEL`)
-3. `config.yaml` in the current directory
-4. `$HOME/.config/ana/config.yaml`
-5. Built-in defaults (development mode, info logging, pretty format)
-
-The loader returns `mo.Result[*Config]` for monadic error handling. Config is validated after loading — invalid values produce clear error messages.
+## Development
 
 ```bash
-ana config show       # Display all resolved config values
-ana config validate   # Check config is valid
+task                 # list tasks
+task build           # build ./bin/ana
+task run             # build and run
+task test            # go test -race ./...
+task test-coverage   # coverage report
+task lint            # strict golangci-lint suite
+task fmt             # auto-format and auto-fix
+task ci              # the full pipeline
 ```
 
-### Dependency Injection: samber/do v2
+Builds need `CGO_ENABLED=1` and libsystemd, so the tasks set that up for you. Project-local
+caches (`.gocache/`, `.gomodcache/`, `.tmp/`) are gitignored.
 
-Services are registered lazily in `internal/di/register.go` and resolved on first use. The container pattern:
+## Project layout
 
-1. `NewContainer(configPath)` creates the root injector
-2. `RegisterServices()` registers all providers (config, logger, etc.)
-3. Services resolve dependencies via `do.MustInvoke[T](injector)` in their constructors
-4. `ShutdownWithContext()` tears down all services gracefully
-
-To add a new service: create it in `internal/yourpkg/`, register with `do.Provide(injector, NewYourService)` in `register.go`.
-
-### Error Handling: samber/oops
-
-Errors use `samber/oops` for structured context throughout the DI and config layers:
-
-```go
-return nil, oops.
-    In("config").           // domain
-    Code("invalid_config"). // machine-readable code
-    Wrapf(err, "load configuration")
+```text
+cmd/ana/                 CLI entrypoint: chat, config, version
+internal/ana/rlm/        the controller loop, recursion, budget, trace emitter
+internal/ana/repl/       embedded mvm interpreter + the agent.* / host primitives
+internal/ana/scenarios/  the controller, sub, and judge system prompts
+internal/ana/journal/    journald reader over sdjournal (cgo)
+internal/ana/systemd/    unit status over dbus (pure Go)
+internal/ana/citations/  the grounding store the judge validates against
+internal/openai/         gpt-5.5 clients for the three roles + per-role effort
+internal/terminal/       the tcell chat UI, trace rendering, and the channel pump
+internal/tui/            the widget + markdown toolkit the UI is built on
+internal/config/         Viper config defaults, loading, and validation
+internal/di/             service wiring with samber/do
+internal/transcript/     shared transcript roles and tool-event formatting
+internal/vinfo/          build-time version metadata
 ```
 
-This gives you stack traces, domain context, and error codes without losing the original error chain.
+## Prior art
 
-### Logging: zerolog + slog Bridge
-
-The logger service creates a `zerolog.Logger` and bridges it to Go's `slog` via `samber/slog-zerolog`. This means:
-
-- Use `slog` in application code (stdlib, portable)
-- Get zerolog's performance and structured output under the hood
-- Pretty console output in development, JSON in production
-- Controlled via `logging.level` (debug/info/warn/error) and `logging.format` (pretty/json)
-
-### Functional Utilities: samber/lo + samber/mo
-
-- **lo**: Generic slice/map operations — `lo.Map`, `lo.Filter`, `lo.SliceToMap`, `lo.MaxBy`, `lo.Uniq`, etc.
-- **mo**: Monadic types — `mo.Option[T]`, `mo.Result[T]`, `mo.Either[L, R]`. Config loading returns `mo.Result` for composable error handling.
-
-### Git Hooks: Lefthook
-
-Three hooks are installed via `lefthook install`:
-
-**pre-commit** (runs in parallel):
-
-- `golangci-lint run --fix` on staged `.go` files (auto-stages fixes)
-- `task test-short` for fast feedback
-
-**pre-push**:
-
-- `task test` (full test suite with race detector)
-- `task build` (ensures the binary compiles)
-
-**commit-msg**:
-
-- Enforces [Conventional Commits](https://www.conventionalcommits.org/) format
-- Valid types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `chore`, `ci`, `build`
-- Format: `type(scope?): subject`
-- Examples: `feat: add user auth`, `fix(config): handle missing file`, `chore: bump deps`
-
-Hooks skip on merge and rebase to avoid friction.
-
-### Linting: golangci-lint v2
-
-The `.golangci.yml` enables 50+ linters with strict settings and **no exclusions on test files**:
-
-| Setting                          | Value                 | Why                         |
-| -------------------------------- | --------------------- | --------------------------- |
-| `gocyclo.min-complexity`         | 10                    | Keep functions simple       |
-| `gocognit.min-complexity`        | 15                    | Enforce readability         |
-| `funlen.lines`                   | 80                    | Short functions             |
-| `funlen.statements`              | 50                    | Short functions             |
-| `lll.line-length`                | 120                   | Reasonable line width       |
-| `dupl.threshold`                 | 100                   | Catch copy-paste            |
-| `errcheck.check-type-assertions` | true                  | No unchecked type casts     |
-| `errcheck.check-blank`           | true                  | No `_ = err`                |
-| `exhaustruct`                    | project packages only | Catch missing struct fields |
-
-Only protobuf (`.pb.go`) and generated (`_generated.go`) files are excluded.
-
-### Build: ldflags Version Injection
-
-`task build` injects version metadata via `-ldflags`:
-
-- `Version` — from `git describe --tags --always --dirty`
-- `Commit` — from `git rev-parse --short HEAD`
-- `BuildDate` — UTC timestamp
-
-The `internal/vinfo` package exposes `String()` which formats these for `--version` output. Falls back to `debug.ReadBuildInfo()` for `go install` builds.
-
-### CI/CD: GitHub Actions
-
-**CI** (`.github/workflows/ci.yml`):
-
-- Triggers on push/PR to main/master
-- Runs golangci-lint via official action
-- Runs tests with coverage (uploads to Codecov)
-- Cross-compiles build matrix: linux/darwin/windows × amd64/arm64
-- Uses `go-version-file: go.mod` (always matches local Go version)
-- Concurrency groups cancel superseded runs
-
-**Release** (`.github/workflows/release.yml`):
-
-- Triggers on `v*.*.*` tag push
-- Runs GoReleaser v2 to build, archive, generate changelog, and publish GitHub release
-
-### Release: GoReleaser v2
-
-`goreleaser` builds for linux/darwin/windows (amd64 + arm64), creates tar.gz archives (zip for Windows), generates SHA-256 checksums, and publishes a GitHub release with a conventional-commit-based changelog grouped by type (features, fixes, performance).
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0  # Triggers release workflow
-```
-
-### Tool Versions: mise
-
-All tool versions are pinned in `.mise.toml`:
-
-- **Go** — pinned to specific patch version
-- **Task** — pinned
-- **golangci-lint** — pinned
-- **lefthook** — pinned
-
-Run `mise install` to get the exact versions. No global installs needed.
-
-### Local Caches
-
-Build caches are kept per-project (not in `$HOME`) for isolation:
-
-- `.gocache/` — Go build cache
-- `.gomodcache/` — Go module cache
-- `.tmp/` — golangci-lint cache, temp files
-
-All are gitignored. `task clean` removes everything.
-
-### Dependency Updates: Renovate
-
-Renovate is pre-configured with `config:recommended`. Once enabled on your GitHub repo, it will automatically open PRs for dependency updates in `go.mod`.
-
-### AI Coding Skills
-
-The `.agents/skills/` directory contains [cc-skills-golang](https://github.com/samber/cc-skills-golang) — a curated set of agentic coding skills for AI assistants working in Go codebases. These provide opinionated guidance for code generation, testing patterns, and project conventions.
-
-`.agents/skills/` is the single source of truth. At `task init`, you pick which AI coding assistants you use and the init tool creates `.<harness>/skills/` symlink directories pointing into `.agents/skills/`. Supported harnesses include `.adal`, `.augment`, `.claude`, `.codebuddy`, `.continue`, `.cortex`, `.crush`, `.factory`, `.goose`, `.iflow`, `.junie`, `.kilocode`, `.kiro`, `.kode`, `.openhands`, `.qoder`, `.qwen`, `.roo`, `.trae`, `.windsurf`, `.zencoder`, and more.
+- [Recursive Language Models](https://alexzhang13.github.io/blog/2025/rlm/) by Zhang, Kraska & Khattab (MIT). The core idea anamnesis adapts.
+- [mvm](https://github.com/mvm-sh/mvm). The embedded Go interpreter the controller runs on.
+- [openai/openai-go](https://github.com/openai/openai-go). The official SDK used for all three model roles.
+- [librecode](https://github.com/omarluq/librecode), my terminal agent harness.
+- [XiaoConstantine/rlm-go](https://github.com/XiaoConstantine/rlm-go), a Go RLM on yaegi. The source of the `Query`/`QueryBatched`/`FINAL` primitive names.
+- [Grafito](https://github.com/ralsina/grafito), journald plus a small web UI plus a single "explain this line" call. The right spirit, a different shape.
 
 ## License
 
 MIT
+
+[^1]:
+    In Platonic epistemology, anamnesis (the theory of recollection) is the idea that
+    learning is really _remembering_ knowledge the soul already held. In medicine,
+    anamnesis is a patient's history, the foundational data gathered at the first
+    consultation. Both senses fit a tool that reconstructs what your machine remembers.
