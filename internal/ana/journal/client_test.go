@@ -121,7 +121,7 @@ func TestClientAcquireReleaseReusesIdleReader(t *testing.T) {
 
 	factory.AssertExpectations(t)
 	factory.AssertNumberOfCalls(t, "NewReader", 1)
-	reader.AssertCalled(t, "FlushMatches")
+	reader.AssertNumberOfCalls(t, "FlushMatches", 2)
 }
 
 func TestClientAcquirePropagatesFactoryError(t *testing.T) {

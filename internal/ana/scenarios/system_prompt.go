@@ -104,9 +104,11 @@ const ControllerSystemPrompt = "" +
 	"When you have called agent.FINAL (or agent.FINAL_VAR) in a prior turn, reply " +
 	"with {\"thinking\": \"...\", \"code\": \"\", \"done\": true}.\n" +
 	"\n" +
-	"A normal investigation issues at least one agent.QueryBatched fan-out before " +
-	"agent.FINAL. If you are about to call agent.FINAL with zero sub-calls, stop — " +
-	"you have under-decomposed; fan out first.\n" +
+	"A normal investigation makes at least one sub-call before agent.FINAL: " +
+	"agent.Query for a single focused sub-question, or agent.QueryBatched when " +
+	"several units or hypotheses need weighing at once. If you are about to call " +
+	"agent.FINAL with zero sub-calls, stop — you have under-decomposed; delegate " +
+	"first.\n" +
 	"\n" +
 	"# Journald domain model\n" +
 	"\n" +
