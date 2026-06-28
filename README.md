@@ -4,10 +4,8 @@
   <a href="https://pkg.go.dev/github.com/omarluq/anamnesis"><img src="https://img.shields.io/badge/reference-007d9c?style=flat&labelColor=24292e&logo=go&logoColor=white" alt="Go Reference"></a>
   <a href="https://go.dev/"><img src="https://img.shields.io/badge/-%3E%3D1.26-00ADD8?style=flat&labelColor=24292e&logo=go&logoColor=white" alt="Go Version"></a>
   <a href="https://goreportcard.com/report/github.com/omarluq/anamnesis"><img src="https://img.shields.io/badge/report-A%2B-00ADD8?style=flat&labelColor=24292e&logo=go&logoColor=white" alt="Go Report Card"></a>
-  <br/>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue?style=flat&labelColor=24292e&logo=opensourceinitiative&logoColor=white" alt="License: MIT"></a>
   <a href="https://github.com/omarluq/anamnesis/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/omarluq/anamnesis/ci.yml?style=flat&labelColor=24292e&label=Tests&logo=github&logoColor=white" alt="Tests"></a>
-  <a href="https://mise.jdx.dev"><img src="https://img.shields.io/badge/built%20with-mise%20%2B%20task-7c3aed?style=flat&labelColor=24292e" alt="mise + task"></a>
 </p>
 
 anamnesis _(/ˌanəmˈnēsəs/, Greek for "remembrance", a calling-to-mind [^1])_
