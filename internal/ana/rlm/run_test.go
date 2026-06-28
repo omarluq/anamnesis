@@ -125,11 +125,13 @@ var (
 // TestInvestigateRunsTwoTurnInvestigation is the RLM-12 acceptance test: it drives
 // rlm.Investigate through a two-turn investigation assembled entirely from mock
 // model seams and mock host surfaces over a real interpreter, citation store, and
-// emitter. Turn 0 queries the journal and prints the match count; turn 1
-// summarizes the matched entries through a recursive sub-call, cites them, and
-// signals agent.FINAL; turn 2 reports done. It proves the run resolves the sub-LLM
-// answer as the final answer, grounds the citation against the recorded query, and
-// emits the turn, sub-call, and final trace events in order on the channel.
+// emitter. With MaxDepth 0 every agent.Query is the flat base-case sub-call, so
+// this pins the depth-0 leaf path: turn 0 queries the journal and prints the match
+// count; turn 1 summarizes the matched entries through a base-case sub-call, cites
+// them, and signals agent.FINAL; turn 2 reports done. It proves the run resolves
+// the sub-LLM answer as the final answer, grounds the citation against the recorded
+// query, and emits the turn, sub-call, and final trace events in order on the
+// channel.
 func TestInvestigateRunsTwoTurnInvestigation(t *testing.T) {
 	t.Parallel()
 
@@ -164,13 +166,15 @@ func TestInvestigateRunsTwoTurnInvestigation(t *testing.T) {
 	judge.On("Judge", mock.Anything, question, answer, mock.Anything).Return("", nil).Once()
 
 	deps := rlm.Deps{
-		Controller: controllerLLM,
-		Sub:        sub,
-		Judge:      judge,
-		Journal:    journalHost,
-		Systemd:    systemdHost,
-		Events:     events,
-		RunID:      fixtureRunID,
+		Controller:  controllerLLM,
+		Sub:         sub,
+		Judge:       judge,
+		Journal:     journalHost,
+		Systemd:     systemdHost,
+		Events:      events,
+		RunID:       fixtureRunID,
+		MaxDepth:    0,
+		MaxSubCalls: repl.DefaultMaxSubCalls,
 	}
 
 	got, err := rlm.Investigate(context.Background(), question, &deps)
@@ -205,13 +209,15 @@ func TestInvestigateSurfacesControllerFailure(t *testing.T) {
 		Once()
 
 	deps := rlm.Deps{
-		Controller: controllerLLM,
-		Sub:        new(mockSubLLM),
-		Judge:      new(mockJudger),
-		Journal:    new(mockJournalHost),
-		Systemd:    new(mockSystemdHost),
-		Events:     events,
-		RunID:      fixtureRunID,
+		Controller:  controllerLLM,
+		Sub:         new(mockSubLLM),
+		Judge:       new(mockJudger),
+		Journal:     new(mockJournalHost),
+		Systemd:     new(mockSystemdHost),
+		Events:      events,
+		RunID:       fixtureRunID,
+		MaxDepth:    0,
+		MaxSubCalls: repl.DefaultMaxSubCalls,
 	}
 
 	got, err := rlm.Investigate(context.Background(), question, &deps)

@@ -96,13 +96,15 @@ func investigationDeps(
 	}
 
 	return &rlm.Deps{
-		Controller: controller,
-		Sub:        sub,
-		Judge:      judge,
-		Journal:    journalSurface,
-		Systemd:    systemdSurface,
-		Events:     events,
-		RunID:      runID,
+		Controller:  controller,
+		Sub:         sub,
+		Judge:       judge,
+		Journal:     journalSurface,
+		Systemd:     systemdSurface,
+		Events:      events,
+		RunID:       runID,
+		MaxDepth:    repl.DefaultMaxDepth,
+		MaxSubCalls: repl.DefaultMaxSubCalls,
 	}, nil
 }
 
