@@ -74,6 +74,45 @@ func TestApplyTraceBuildsTranscriptAcrossKinds(t *testing.T) {
 		"the transcript holds the thinking, query, and assistant messages in order")
 }
 
+func TestApplyTraceStreamsThinkingDeltasThenSettles(t *testing.T) {
+	t.Parallel()
+
+	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+
+	// Reasoning streams in as deltas, growing one pending thinking block in place.
+	app.applyTrace(traceEvent(TraceKindThinkingDelta, "Listing the ", 0))
+	app.applyTrace(traceEvent(TraceKindThinkingDelta, "recent boots.", 0))
+
+	require.Len(t, app.history, 1, "deltas grow a single block, not one block per delta")
+	require.Equal(t, transcript.RoleThinking, app.history[0].Role)
+	require.True(t, app.history[0].Pending, "the thinking block stays pending while streaming")
+	require.True(t, app.working, "streaming thinking marks the shell working")
+	assert.Equal(t, "Listing the recent boots.", app.history[0].Content, "deltas concatenate")
+
+	// The authoritative final thinking settles the streamed block in place — no duplicate.
+	app.applyTrace(traceEvent(TraceKindThinking, "Listed the recent boots to find the failure.", 0))
+
+	require.Len(t, app.history, 1, "the final thinking settles the pending block rather than appending a duplicate")
+	assert.False(t, app.history[0].Pending, "the block is settled")
+	assert.Equal(t, "Listed the recent boots to find the failure.", app.history[0].Content,
+		"the authoritative summary replaces the streamed text")
+}
+
+func TestApplyTraceThinkingWithoutDeltasAppendsFreshBlock(t *testing.T) {
+	t.Parallel()
+
+	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+
+	// No deltas streamed (the model returned no reasoning summary) → the terse fallback
+	// thinking appends as a fresh, already-settled block.
+	app.applyTrace(traceEvent(TraceKindThinking, "terse fallback rationale", 0))
+
+	require.Len(t, app.history, 1)
+	assert.Equal(t, transcript.RoleThinking, app.history[0].Role)
+	assert.False(t, app.history[0].Pending, "a non-streamed thinking block is settled immediately")
+	assert.Equal(t, "terse fallback rationale", app.history[0].Content)
+}
+
 func TestApplyTraceCodeEventsRenderAsToolBlock(t *testing.T) {
 	t.Parallel()
 
@@ -101,6 +140,37 @@ func TestApplyTraceCodeEventsRenderAsToolBlock(t *testing.T) {
 	app.toolsExpanded = true
 	lines := app.renderMessage(80, app.history[0])
 	assert.NotEmpty(t, lines, "a code block renders through the tool-block path")
+}
+
+func TestApplyTraceCodeErrorRendersRedToolBlock(t *testing.T) {
+	t.Parallel()
+
+	app := newApp(newFakeScreen(80, 24), RunOptions{Trace: nil, Controller: nil, Title: defaultTitle})
+
+	app.applyTrace(traceEvent(TraceKindCodeStart, "journal.Query(\"bad syntax\")", 0))
+	require.True(t, app.history[0].Pending, "a code start opens a pending block")
+
+	// A CodeEnd carrying an Err settles the block, routing the failure into its
+	// error: section rather than folding it into the output text.
+	codeErr := "syntax error: unexpected EOF"
+	app.applyTrace(TraceEvent{
+		Kind:  TraceKindCodeEnd,
+		Text:  "partial stdout",
+		Err:   codeErr,
+		Depth: 0,
+		RunID: 0,
+	})
+
+	require.Len(t, app.history, 1, "the code end settles the block in place")
+	require.False(t, app.history[0].Pending, "the code end settles the pending block")
+
+	parsed := parseQueryContent(app.history[0].Content)
+	assert.Equal(t, codeErr, parsed.Error, "the error text routes into the block's error section")
+
+	// A non-empty error section paints the block red through the shared tool-block
+	// style path that query blocks and code blocks both render through.
+	style := queryBlockStyle(app.theme, app.history[0], parsed)
+	assert.Equal(t, app.theme.bg(app.theme.ToolErrorBg), style, "an errored code block paints red")
 }
 
 func TestApplyTraceFinalAppendsAssistantAndClearsSpinner(t *testing.T) {
@@ -410,7 +480,7 @@ func TestAppRendersTranscriptComposerFooterAndQuits(t *testing.T) {
 	assert.Contains(t, contents, "final answer", "the transcript renders the assistant answer")
 	// Footer: the title and the key hints — no side panes, no usage totals.
 	footer := screenRow(t, contents, "anamnesis")
-	assert.Contains(t, footer, "ctrl+o queries", "the footer renders the key hints")
+	assert.Contains(t, footer, "ctrl+o expand", "the footer renders the key hints")
 	assert.NotContains(t, contents, "Trace", "no trace pane is rendered")
 	assert.NotContains(t, contents, "Metric", "no cost pane is rendered")
 }

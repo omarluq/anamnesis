@@ -71,6 +71,46 @@ func (app *App) appendThinking(text string) {
 	app.history = append(app.history, newChatMessage(transcript.RoleThinking, trimmed))
 }
 
+// appendThinkingDelta grows the turn's live thinking block with one streamed
+// reasoning chunk: it appends delta to the open pending thinking block, or opens a
+// fresh pending block when none is open (the first delta of a turn). The streamed
+// deltas arrive contiguously, so the open block is always the most recent message.
+func (app *App) appendThinkingDelta(delta string) {
+	if last := len(app.history) - 1; last >= 0 &&
+		app.history[last].Role == transcript.RoleThinking && app.history[last].Pending {
+		app.history[last].Content += delta
+
+		return
+	}
+
+	app.history = append(app.history, chatMessage{
+		Role:    transcript.RoleThinking,
+		Content: delta,
+		Depth:   0,
+		Pending: true,
+	})
+}
+
+// settleThinking finalizes the turn's thinking block. When reasoning streamed live a
+// pending block is already open, so this replaces its text with the authoritative
+// summary and settles it — no duplicate block. When nothing streamed (the model
+// returned no reasoning summary) it appends text as a fresh thinking block, ignoring
+// blank text exactly as appendThinking does.
+func (app *App) settleThinking(text string) {
+	last := len(app.history) - 1
+	if last < 0 || app.history[last].Role != transcript.RoleThinking || !app.history[last].Pending {
+		app.appendThinking(text)
+
+		return
+	}
+
+	if settled := strings.TrimSpace(text); settled != "" {
+		app.history[last].Content = settled
+	}
+
+	app.history[last].Pending = false
+}
+
 // appendQueryStart opens a pending query block for a recursive agent.Query
 // sub-call carrying prompt at the given recursion depth.
 func (app *App) appendQueryStart(prompt string, depth int) {
@@ -124,16 +164,17 @@ func queryContent(prompt, result string) string {
 func (app *App) appendCodeStart(code string) {
 	app.history = append(app.history, chatMessage{
 		Role:    transcript.RoleBashExecution,
-		Content: codeContent(code, ""),
+		Content: codeContent(code, "", ""),
 		Depth:   0,
 		Pending: true,
 	})
 }
 
 // completeCode fills the most recent pending code block with output, settling it. A
-// CodeEnd with no matching open block is ignored so a stray end event cannot corrupt
-// the transcript.
-func (app *App) completeCode(output string) {
+// non-empty errText routes into the block's error: section so the block renders red;
+// a CodeEnd with no matching open block is ignored so a stray end event cannot
+// corrupt the transcript.
+func (app *App) completeCode(output, errText string) {
 	for index, message := range slices.Backward(app.history) {
 		if !message.Pending || message.Role != transcript.RoleBashExecution {
 			continue
@@ -142,7 +183,7 @@ func (app *App) completeCode(output string) {
 		parsed := parseQueryContent(message.Content)
 		app.history[index] = chatMessage{
 			Role:    transcript.RoleBashExecution,
-			Content: codeContent(parsed.Args, output),
+			Content: codeContent(parsed.Args, output, errText),
 			Depth:   0,
 			Pending: false,
 		}
@@ -151,16 +192,17 @@ func (app *App) completeCode(output string) {
 	}
 }
 
-// codeContent renders a code block's Go source and captured output into the
-// transcript's tool-event wire format, reusing the shared transcript formatter so a
-// code block parses and renders through the same path as a query block.
-func codeContent(code, output string) string {
+// codeContent renders a code block's Go source, captured output, and any error into
+// the transcript's tool-event wire format, reusing the shared transcript formatter so
+// a code block parses and renders through the same path as a query block. A non-empty
+// errText fills the error: section, which paints the settled block red.
+func codeContent(code, output, errText string) string {
 	return transcript.FormatToolEventDisplay(&transcript.ToolEvent{
 		Name:          codeName,
 		ArgumentsJSON: code,
 		DetailsJSON:   "",
 		Result:        output,
-		Error:         "",
-		IsError:       false,
+		Error:         errText,
+		IsError:       errText != "",
 	})
 }

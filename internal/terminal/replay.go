@@ -111,6 +111,7 @@ func replayLine(kind TraceKind, text string, depth int) TraceEvent {
 	return TraceEvent{
 		Kind:  kind,
 		Text:  text,
+		Err:   "",
 		Depth: depth,
 		RunID: 0,
 	}

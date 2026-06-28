@@ -32,9 +32,19 @@ func NewEmitter(ctx context.Context, events chan<- terminal.TraceEvent, runID ui
 }
 
 // Thinking emits a reasoning-turn event carrying the controller's thinking, which
-// the chat transcript renders as the turn's dim/italic thinking block.
+// the chat transcript renders as the turn's dim/italic thinking block. After a turn
+// streamed its reasoning live via ThinkingDelta, this final event settles that
+// pending block with the authoritative summary rather than appending a duplicate.
 func (emitter *Emitter) Thinking(text string) {
 	emitter.emit(terminal.TraceKindThinking, text, 0)
+}
+
+// ThinkingDelta emits one incremental chunk of the controller's reasoning summary as
+// it streams from the model, so the chat transcript can grow the turn's thinking
+// block live instead of waiting for the whole turn. The matching Thinking event
+// settles the block once the turn completes.
+func (emitter *Emitter) ThinkingDelta(text string) {
+	emitter.emit(terminal.TraceKindThinkingDelta, text, 0)
 }
 
 // CodeStart emits the opening event of a controller turn's code evaluation,
@@ -44,11 +54,18 @@ func (emitter *Emitter) CodeStart(code string) {
 	emitter.emit(terminal.TraceKindCodeStart, code, 0)
 }
 
-// CodeEnd emits the closing event of a controller turn's code evaluation, carrying
-// the captured stdout, return value, and any evaluation error as the output that
-// settles the pending code block CodeStart opened.
-func (emitter *Emitter) CodeEnd(output string) {
-	emitter.emit(terminal.TraceKindCodeEnd, output, 0)
+// CodeEnd emits the closing event of a controller turn's code evaluation: output
+// carries the captured stdout and return value, and errText carries the evaluation
+// error (empty on success). A non-empty errText settles the code block as a red
+// failure; an empty one settles it as a green success.
+func (emitter *Emitter) CodeEnd(output, errText string) {
+	emitter.send(terminal.TraceEvent{
+		Kind:  terminal.TraceKindCodeEnd,
+		Text:  output,
+		Err:   errText,
+		RunID: emitter.runID,
+		Depth: 0,
+	})
 }
 
 // QueryStart emits the opening event of an agent.Query sub-call at depth, carrying
@@ -75,6 +92,7 @@ func (emitter *Emitter) emit(kind terminal.TraceKind, text string, depth int) {
 	emitter.send(terminal.TraceEvent{
 		Kind:  kind,
 		Text:  text,
+		Err:   "",
 		RunID: emitter.runID,
 		Depth: depth,
 	})

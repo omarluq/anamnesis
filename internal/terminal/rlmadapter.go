@@ -65,6 +65,7 @@ func (adapter *rlmController) emitFailure(ctx context.Context, out chan<- TraceE
 	event := TraceEvent{
 		Kind:  TraceKindFinal,
 		Text:  "investigation failed: " + cause.Error(),
+		Err:   "",
 		Depth: 0,
 		RunID: runID,
 	}

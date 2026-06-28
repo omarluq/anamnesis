@@ -63,6 +63,7 @@ func chatTrace(kind terminal.TraceKind, text string) terminal.TraceEvent {
 	return terminal.TraceEvent{
 		Kind:  kind,
 		Text:  text,
+		Err:   "",
 		Depth: 0,
 		RunID: 0,
 	}

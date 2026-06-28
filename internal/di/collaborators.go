@@ -63,13 +63,14 @@ var _ rlm.ControllerLLM = (*controllerAdapter)(nil)
 func (adapter *controllerAdapter) Respond(
 	ctx context.Context,
 	systemPrompt, question, history string,
+	onReasoning func(string),
 ) (openai.ControllerResponse, error) {
 	client, err := adapter.resolve()
 	if err != nil {
 		return openai.ControllerResponse{Thinking: "", Code: "", Done: false}, err
 	}
 
-	result, err := client.Controller(ctx, systemPrompt, controllerInput(question, history))
+	result, err := client.Controller(ctx, systemPrompt, controllerInput(question, history), onReasoning)
 	if err != nil {
 		return openai.ControllerResponse{Thinking: "", Code: "", Done: false}, err
 	}

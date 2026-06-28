@@ -54,7 +54,7 @@ func TestControllerSystemPromptHostSignatures(t *testing.T) {
 func TestControllerSystemPromptBudgets(t *testing.T) {
 	t.Parallel()
 
-	budgets := []string{"12 turns", "recursion depth 3", "30 sub-calls", "120s"}
+	budgets := []string{"30 turns", "recursion depth 3", "60 sub-calls", "30min"}
 
 	require.Len(t, budgets, 4, "all four budget figures must be covered")
 

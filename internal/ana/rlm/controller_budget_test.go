@@ -193,7 +193,10 @@ func assertTurnEvents(t *testing.T, events []terminal.TraceEvent, thinking strin
 			codeStarts++
 		case terminal.TraceKindCodeEnd:
 			codeEnds++
-		case terminal.TraceKindQueryStart, terminal.TraceKindQueryEnd, terminal.TraceKindFinal:
+		case terminal.TraceKindThinkingDelta,
+			terminal.TraceKindQueryStart,
+			terminal.TraceKindQueryEnd,
+			terminal.TraceKindFinal:
 		}
 	}
 

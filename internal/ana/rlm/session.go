@@ -14,8 +14,14 @@ import (
 type ControllerLLM interface {
 	// Respond returns the structured controller reply for the next turn, given
 	// the controller system prompt, the original user question, and the rendered
-	// transcript of prior turns. It returns an error when the model call fails.
-	Respond(ctx context.Context, systemPrompt, question, history string) (openai.ControllerResponse, error)
+	// transcript of prior turns. onReasoning receives the model's reasoning-summary
+	// deltas as they stream so the caller can render thinking live; it may be nil to
+	// ignore them. It returns an error when the model call fails.
+	Respond(
+		ctx context.Context,
+		systemPrompt, question, history string,
+		onReasoning func(string),
+	) (openai.ControllerResponse, error)
 }
 
 // SubLLM is the recursive sub-call seam agent.Query drives. The rlm package owns
