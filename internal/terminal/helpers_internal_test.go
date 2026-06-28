@@ -250,10 +250,23 @@ func composerInputCtrl(app *App, key string) {
 	app.composerKey(tui.KeyEvent{Key: key, Text: "", Ctrl: true, Alt: false, Shift: false})
 }
 
-// toggleKey applies a ctrl-chorded collapse toggle (ctrl+t / ctrl+o) the way the
-// run loop routes it before the composer sees it.
+// toggleKey routes the ctrl+o query-block toggle through the real key dispatch — the
+// same handleKey path the run loop uses — and reports whether it flipped query-block
+// expansion, proving the dispatch consumes the toggle before the composer sees it.
 func toggleKey(app *App, key string) bool {
-	return app.applyToggle(tui.KeyEvent{Key: key, Text: "", Ctrl: true, Alt: false, Shift: false})
+	expandBefore := app.toolsExpanded
+	app.handleKey(context.Background(), ctrlKey(key))
+
+	return app.toolsExpanded != expandBefore
+}
+
+// ctrlKey builds the tcell event for the ctrl+o query-block toggle.
+func ctrlKey(key string) *tcell.EventKey {
+	if key == "ctrl+o" {
+		return tcell.NewEventKey(tcell.KeyCtrlO, "", tcell.ModNone)
+	}
+
+	return tcell.NewEventKey(tcell.KeyRune, key, tcell.ModNone)
 }
 
 // transcriptText renders the full transcript at width and joins every line's text,

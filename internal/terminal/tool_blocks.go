@@ -276,6 +276,15 @@ func parseQueryContent(content string) parsedQuery {
 	current := ""
 
 	for line := range strings.SplitSeq(content, "\n") {
+		// output is the terminal free-text section — a sub-answer that may itself
+		// contain lines that look like "output:"/"error:"/"tool:" markers — so once
+		// it opens, every remaining line is output content, not a new section header.
+		if current == sectionOutput {
+			sections[sectionOutput] = append(sections[sectionOutput], line)
+
+			continue
+		}
+
 		name, value, ok := parseQuerySectionHeader(line)
 		if !ok {
 			if current != "" {

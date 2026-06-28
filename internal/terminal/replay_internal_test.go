@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -116,10 +117,7 @@ func TestDefaultReplayScriptShowsThinkingAndNestedQuery(t *testing.T) {
 
 	script := defaultReplayScript()
 
-	kinds := make([]TraceKind, 0, len(script))
-	for _, event := range script {
-		kinds = append(kinds, event.Kind)
-	}
+	kinds := lo.Map(script, func(event TraceEvent, _ int) TraceKind { return event.Kind })
 
 	assert.Equal(t, []TraceKind{
 		TraceKindThinking,
