@@ -33,6 +33,26 @@ func TestInterpreterStatePersistsAcrossEval(t *testing.T) {
 	assert.Equal(t, int64(42), result.Retval.Int())
 }
 
+// TestInterpreterRedeclareAcrossEval probes whether re-declaring a persisted
+// top-level variable with := in a later Eval errors (Go's "no new variables on the
+// left side of :=") or is tolerated, so the §14 prompt can steer the controller to
+// reuse a persisted variable with = rather than re-declaring it with := every turn.
+func TestInterpreterRedeclareAcrossEval(t *testing.T) {
+	t.Parallel()
+
+	interpreter := repl.NewInterpreter()
+
+	_, err := interpreter.Eval("turn_0", "n := 1")
+	require.NoError(t, err)
+
+	_, redeclareErr := interpreter.Eval("turn_1", "n := 2")
+	t.Logf("redeclare a persisted var with := across Eval → err=%v", redeclareErr)
+
+	reassigned, err := interpreter.Eval("turn_2", "n = 3\nn")
+	require.NoError(t, err, "reassigning a persisted var with = must work across turns")
+	assert.Equal(t, int64(3), reassigned.Retval.Int())
+}
+
 // TestInterpreterEvalWrapsError checks that a compile fault surfaces as an
 // oops error carrying the repl domain and the eval_failed code rather than a
 // bare interpreter error.

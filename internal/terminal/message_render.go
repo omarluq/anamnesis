@@ -66,7 +66,7 @@ func (app *App) renderUserMessage(width int, content string) []tui.Line {
 // renderAssistantMessage renders content as markdown with a blank spacer above
 // and below.
 func (app *App) renderAssistantMessage(width int, content string) []tui.Line {
-	markdownLines := app.renderMarkdown(strings.TrimSpace(content), width)
+	markdownLines := trimBlankLines(app.renderMarkdown(content, width))
 	lines := make([]tui.Line, 0, len(markdownLines)+messageOuterRows)
 
 	lines = append(lines, tui.NewLine(app.theme.fg(app.theme.Dim), ""))
@@ -82,7 +82,7 @@ func (app *App) renderAssistantMessage(width int, content string) []tui.Line {
 func (app *App) renderThinkingMessage(width int, content string) []tui.Line {
 	style := app.theme.fg(app.theme.ThinkingText).Italic(true)
 
-	markdownLines := app.renderMarkdown(strings.TrimSpace(content), width)
+	markdownLines := trimBlankLines(app.renderMarkdown(content, width))
 	lines := make([]tui.Line, 0, len(markdownLines)+messageMetadataRows)
 
 	lines = append(lines,
@@ -110,6 +110,41 @@ func (app *App) renderMarkdown(content string, width int) []tui.Line {
 	}
 
 	return view.Render(width, markdownRenderMaxHeight)
+}
+
+// trimBlankLines drops leading and trailing blank rendered lines so a message's
+// own spacer rows stay the only vertical padding around it. Trimming happens on
+// the rendered output rather than the markdown SOURCE: trimming the source would
+// strip indentation the parser is sensitive to, corrupting constructs such as
+// four-space-indented code blocks.
+func trimBlankLines(lines []tui.Line) []tui.Line {
+	start := 0
+	for start < len(lines) && lineIsBlank(lines[start]) {
+		start++
+	}
+
+	end := len(lines)
+	for end > start && lineIsBlank(lines[end-1]) {
+		end--
+	}
+
+	return lines[start:end]
+}
+
+// lineIsBlank reports whether a rendered line carries no visible glyphs, looking
+// through per-span text so syntax-highlighted blank lines count as blank too.
+func lineIsBlank(line tui.Line) bool {
+	if len(line.Spans) == 0 {
+		return strings.TrimSpace(line.Text) == ""
+	}
+
+	for _, span := range line.Spans {
+		if strings.TrimSpace(span.Text) != "" {
+			return false
+		}
+	}
+
+	return true
 }
 
 // mergeLineStyle overlays style onto every span of line, so a thinking block can
