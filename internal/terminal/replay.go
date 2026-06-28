@@ -93,16 +93,15 @@ func (controller *replayController) wait(ctx context.Context) bool {
 }
 
 // defaultReplayScript returns the canned investigation transcript the offline
-// demo and smoke replay: one reasoning turn that inspects the latest boot, the
-// generated journal code and its captured stdout, a fanned-out sub-call, a usage
-// meter for each step, and the FINAL answer.
+// demo and smoke replay: one thinking turn that inspects the latest boot, a
+// fanned-out agent.Query start and its result at depth one, a usage meter for each
+// step, and the FINAL answer.
 func defaultReplayScript() []TraceEvent {
 	return []TraceEvent{
-		replayLine(TraceKindTurn, "Turn 1: inspecting the latest boot for failure signatures.", 0),
-		replayLine(TraceKindCode, "journal.Boots()", 0),
-		replayLine(TraceKindStdout, "3 boots; latest 9f2c ended in a kernel panic", 0),
+		replayLine(TraceKindThinking, "Turn 1: inspecting the latest boot for failure signatures.", 0),
 		replayUsage("turn 1 usage", 1280, 256, 900_000),
-		replayLine(TraceKindSubCall, "agent.Query: summarize the panic backtrace", 1),
+		replayLine(TraceKindQueryStart, "agent.Query: summarize the panic backtrace", 1),
+		replayLine(TraceKindQueryEnd, "the i915 GPU driver oopsed during resume", 1),
 		replayUsage("sub-call usage", 512, 128, 600_000),
 		replayLine(TraceKindFinal, replayFinalAnswer, 0),
 	}

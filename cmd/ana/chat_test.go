@@ -98,7 +98,7 @@ func TestRunChatWithDrivesControllerToFinal(t *testing.T) {
 	controller := new(mockChatController)
 	channel := scriptedRun(
 		chatRunID,
-		chatTrace(terminal.TraceKindTurn, chatTurnLine),
+		chatTrace(terminal.TraceKindThinking, chatTurnLine),
 		chatTrace(terminal.TraceKindFinal, chatFinalAnswer),
 	)
 	controller.On("Start", mock.Anything, chatQuery, chatRunID).Return(channel)

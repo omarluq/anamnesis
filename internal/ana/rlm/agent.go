@@ -200,14 +200,17 @@ func (agent *Agent) queryOne(prompt string, ctx any) (string, error) {
 	return agent.dispatch(prompt, ctx)
 }
 
-// dispatch makes one already-reserved recursive sub-LLM call: it emits the sub-call
-// trace event and returns the sub-LLM's answer, or a clear oops error when the
-// sub-LLM call fails. Admission against the sub-call budget is the caller's job —
-// queryOne reserves a single call for Query and QueryBatched reserves the whole batch
-// up front — so dispatch never touches the budget and stays the shared tail both
-// paths run once their reservation has been granted.
+// dispatch makes one already-reserved recursive sub-LLM call: it emits the
+// query-start event, calls the sub-LLM, and on success emits the query-end event
+// carrying the answer before returning it, or a clear oops error when the sub-LLM
+// call fails. A failure emits no query-end, so the trace leaves the query block
+// open rather than reporting a result that never came. Admission against the
+// sub-call budget is the caller's job — queryOne reserves a single call for Query
+// and QueryBatched reserves the whole batch up front — so dispatch never touches
+// the budget and stays the shared tail both paths run once their reservation has
+// been granted.
 func (agent *Agent) dispatch(prompt string, ctx any) (string, error) {
-	agent.emitter.SubCall(prompt)
+	agent.emitter.QueryStart(prompt, flatQueryDepth)
 
 	answer, err := agent.subCall(prompt, fmt.Sprint(ctx))
 	if err != nil {
@@ -216,6 +219,8 @@ func (agent *Agent) dispatch(prompt string, ctx any) (string, error) {
 			Code("agent_sub_call_failed").
 			Wrapf(err, "agent sub-LLM call failed")
 	}
+
+	agent.emitter.QueryEnd(answer, flatQueryDepth)
 
 	return answer, nil
 }

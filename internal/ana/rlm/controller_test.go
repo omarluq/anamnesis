@@ -148,7 +148,7 @@ func assertControllerResolvesAnswer(t *testing.T, code, stdout, answer string) {
 	assert.Equal(t, wantTurn, fixture.session.History[0])
 
 	event := <-fixture.events
-	assert.Equal(t, terminal.TraceKindTurn, event.Kind)
+	assert.Equal(t, terminal.TraceKindThinking, event.Kind)
 	assert.Equal(t, codeTurn.Thinking, event.Text)
 	assert.Equal(t, fixtureRunID, event.RunID)
 

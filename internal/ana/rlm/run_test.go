@@ -181,7 +181,7 @@ func TestInvestigateRunsTwoTurnInvestigation(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, answer, got)
 
-	assertTraceSequence(t, events, turn0.Thinking, subPrompt, turn1.Thinking, answer)
+	assertTraceSequence(t, events, turn0.Thinking, subPrompt, answer, turn1.Thinking, answer)
 
 	controllerLLM.AssertNumberOfCalls(t, "Respond", 3)
 	controllerLLM.AssertExpectations(t)
@@ -246,15 +246,29 @@ func scriptControllerTurns(
 	}
 }
 
-// assertTraceSequence drains the run's four trace events and asserts they arrive in
-// the expected order — the first turn, the sub-call fanned out from the second
-// turn, the second turn, and the final answer — each stamped with the run ID.
-func assertTraceSequence(t *testing.T, events <-chan terminal.TraceEvent, turn0, subCall, turn1, final string) {
+// assertTraceSequence drains the run's five trace events and asserts they arrive in
+// the expected order — the first turn's thinking, the start and end of the sub-call
+// fanned out from the second turn, the second turn's thinking, and the final answer —
+// each stamped with the run ID. The root controller's sub-call carries depth 0 (its
+// own node depth); recursive child sub-calls would carry deeper levels.
+func assertTraceSequence(
+	t *testing.T,
+	events <-chan terminal.TraceEvent,
+	thinking0, queryStart, queryEnd, thinking1, final string,
+) {
 	t.Helper()
 
-	assertTraceEvent(t, receiveTraceEvent(t, events), terminal.TraceKindTurn, turn0)
-	assertTraceEvent(t, receiveTraceEvent(t, events), terminal.TraceKindSubCall, subCall)
-	assertTraceEvent(t, receiveTraceEvent(t, events), terminal.TraceKindTurn, turn1)
+	assertTraceEvent(t, receiveTraceEvent(t, events), terminal.TraceKindThinking, thinking0)
+
+	start := receiveTraceEvent(t, events)
+	assertTraceEvent(t, start, terminal.TraceKindQueryStart, queryStart)
+	assert.Equal(t, 0, start.Depth, "the root sub-call's query start carries its node depth")
+
+	end := receiveTraceEvent(t, events)
+	assertTraceEvent(t, end, terminal.TraceKindQueryEnd, queryEnd)
+	assert.Equal(t, 0, end.Depth, "the root sub-call's query end carries its node depth")
+
+	assertTraceEvent(t, receiveTraceEvent(t, events), terminal.TraceKindThinking, thinking1)
 	assertTraceEvent(t, receiveTraceEvent(t, events), terminal.TraceKindFinal, final)
 }
 

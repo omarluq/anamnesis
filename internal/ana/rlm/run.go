@@ -105,8 +105,8 @@ func Investigate(ctx context.Context, question string, deps *Deps) (string, erro
 	defer cancel()
 
 	store := citations.NewStore()
-	emitter := NewEmitter(deps.Events, deps.RunID)
-	factory := newRecursor(deps, budget, emitter, emitterQueryTracer{emitter: emitter})
+	emitter := NewEmitter(ctx, deps.Events, deps.RunID)
+	factory := newRecursor(deps, budget, emitter, emitter)
 	root := RecursionContext{CurrentDepth: 0, MaxDepth: deps.MaxDepth}
 
 	interpreter, err := factory.interpreter(ctx, root, store)
@@ -196,26 +196,3 @@ func (surface *recordingJournal) Counts(bootID, byField string) map[string]int {
 func (surface *recordingJournal) Unique(field string, filter *journal.QueryFilter) []string {
 	return surface.delegate.Unique(field, filter)
 }
-
-// emitterQueryTracer bridges the narrow QueryTracer the recursion core emits
-// through to the run's Emitter. In this branch QueryStart re-emits the existing
-// sub-call trace event so the shell keeps rendering sub-calls and QueryEnd is a
-// no-op; Branch 2 replaces this bridge by making the Emitter satisfy QueryTracer
-// directly, carrying the result and depth through to a query-end trace event.
-type emitterQueryTracer struct {
-	// emitter publishes the sub-call trace event each query start produces.
-	emitter *Emitter
-}
-
-// Compile-time assertion that the bridge satisfies the recursion tracer seam.
-var _ QueryTracer = emitterQueryTracer{emitter: nil}
-
-// QueryStart re-emits the sub-call trace event carrying prompt, preserving the
-// existing trace stream while the depth argument waits for Branch 2 to consume it.
-func (t emitterQueryTracer) QueryStart(prompt string, _ int) {
-	t.emitter.SubCall(prompt)
-}
-
-// QueryEnd drops the end event in this branch; Branch 2 carries the result and
-// depth through to a query-end trace event the shell renders.
-func (t emitterQueryTracer) QueryEnd(_ string, _ int) {}

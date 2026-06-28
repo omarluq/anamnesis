@@ -48,7 +48,7 @@ func TestReplayControllerReplaysScriptStampedWithRunID(t *testing.T) {
 	t.Parallel()
 
 	controller := newReplayController([]TraceEvent{
-		replayLine(TraceKindTurn, "looking", 0),
+		replayLine(TraceKindThinking, "looking", 0),
 		replayUsage("meter", 10, 4, 250_000),
 		replayLine(TraceKindFinal, "done", 0),
 	}, 0)
@@ -64,7 +64,7 @@ func TestReplayControllerReplaysScriptStampedWithRunID(t *testing.T) {
 
 	// The kinds replay in script order, and the usage meter keeps its token and
 	// cost accounting so the cost pane can tally it.
-	assert.Equal(t, TraceKindTurn, got[0].Kind)
+	assert.Equal(t, TraceKindThinking, got[0].Kind)
 	assert.Equal(t, TraceKindUsage, got[1].Kind)
 	assert.Equal(t, 10, got[1].TokensIn)
 	assert.Equal(t, 4, got[1].TokensOut)
@@ -100,7 +100,7 @@ func TestReplayControllerAbandonsRunOnContextCancel(t *testing.T) {
 	// A long pace guarantees the cancellation wins the race before any event is
 	// emitted, proving the controller abandons the channel on a dead context.
 	controller := newReplayController([]TraceEvent{
-		replayLine(TraceKindTurn, "looking", 0),
+		replayLine(TraceKindThinking, "looking", 0),
 		replayLine(TraceKindFinal, "done", 0),
 	}, time.Hour)
 
@@ -117,7 +117,7 @@ func TestReplayControllerDeliversEventsUnderPace(t *testing.T) {
 	// regression that never delivered would fail fast instead of hanging.
 	pace := 20 * time.Millisecond
 	controller := newReplayController([]TraceEvent{
-		replayLine(TraceKindTurn, "a", 0),
+		replayLine(TraceKindThinking, "a", 0),
 		replayLine(TraceKindFinal, "b", 0),
 	}, pace)
 
@@ -130,7 +130,7 @@ func TestReplayControllerDeliversEventsUnderPace(t *testing.T) {
 	// that bypassed wait() would return early and trip this lower bound.
 	assert.GreaterOrEqual(t, elapsed, 2*pace, "paced delivery waits a beat before each event")
 	require.Len(t, got, 2, "every paced event is delivered before the channel closes")
-	assert.Equal(t, TraceKindTurn, got[0].Kind)
+	assert.Equal(t, TraceKindThinking, got[0].Kind)
 	assert.Equal(t, TraceKindFinal, got[1].Kind)
 
 	for _, event := range got {
@@ -140,8 +140,8 @@ func TestReplayControllerDeliversEventsUnderPace(t *testing.T) {
 
 // TestReplayControllerDrivesAppToScriptedFinal wires the offline replay
 // controller into a full App, submits a query through the real composer-and-loop
-// path, and asserts the scripted turn/code/stdout/sub-call/usage/final events all
-// land: ordered trace lines, accumulated cost totals, and the FINAL answer
+// path, and asserts the scripted thinking/query-start/query-end/usage/final events
+// all land: ordered trace lines, accumulated cost totals, and the FINAL answer
 // rendered into the chat pane, all without a single network call.
 func TestReplayControllerDrivesAppToScriptedFinal(t *testing.T) {
 	t.Parallel()
@@ -157,19 +157,19 @@ func TestReplayControllerDrivesAppToScriptedFinal(t *testing.T) {
 	submitQuery(screen, "why did it crash")
 
 	// The FINAL signal is the last scripted event, so once its trace line renders
-	// the whole turn/code/stdout/sub-call/usage/final sequence has drained in order.
+	// the whole thinking/query-start/query-end/usage/final sequence has drained in order.
 	awaitContents(t, screen, "[final]")
 
 	screen.inject(tcell.NewEventKey(tcell.KeyCtrlC, "", tcell.ModNone))
 	require.NoError(t, awaitLoop(t, done))
 
 	// Trace pane: every non-usage scripted event landed, in order, with the
-	// sub-call indented one level and the usage meters routed away to the cost pane.
+	// agent.Query start and result indented one level and the usage meters routed
+	// away to the cost pane.
 	assert.Equal(t, []string{
-		"[turn] Turn 1: inspecting the latest boot for failure signatures.",
-		"[code] journal.Boots()",
-		"[stdout] 3 boots; latest 9f2c ended in a kernel panic",
-		"  [sub-call] agent.Query: summarize the panic backtrace",
+		"[thinking] Turn 1: inspecting the latest boot for failure signatures.",
+		"  [query-start] agent.Query: summarize the panic backtrace",
+		"  [query-end] the i915 GPU driver oopsed during resume",
 		"[final] " + replayFinalAnswer,
 	}, traceLines(app))
 

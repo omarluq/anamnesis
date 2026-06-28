@@ -20,7 +20,7 @@ import (
 
 // raceFixture wires a Session whose sub-call budget and trace channel are sized
 // for a wide fan-out, so a QueryBatched stress test can reserve many sub-calls
-// and emit one event per pair without the channel blocking the host goroutines.
+// and emit two events per pair without the channel blocking the host goroutines.
 type raceFixture struct {
 	sub     *mockSubLLM
 	budget  *rlm.Budget
@@ -31,7 +31,9 @@ type raceFixture struct {
 
 // newRaceFixture builds a raceFixture sized for fanOut concurrent sub-calls: the
 // budget grants headroom beyond fanOut so the exact-reservation assertions have
-// room to drain, and the trace channel buffers one slot per emitted sub-call.
+// room to drain, and the trace channel buffers two slots per sub-call — a
+// query-start and a query-end — so the host goroutines never block on a full
+// channel before the test drains it.
 func newRaceFixture(fanOut int) *raceFixture {
 	controller := new(mockControllerLLM)
 	sub := new(mockSubLLM)
@@ -39,8 +41,8 @@ func newRaceFixture(fanOut int) *raceFixture {
 	budget := rlm.NewBudget()
 	budget.MaxSubCalls = fanOut * 4
 	store := citations.NewStore()
-	events := make(chan terminal.TraceEvent, fanOut)
-	emitter := rlm.NewEmitter(events, fixtureRunID)
+	events := make(chan terminal.TraceEvent, fanOut*2)
+	emitter := rlm.NewEmitter(context.Background(), events, fixtureRunID)
 
 	return &raceFixture{
 		sub:    sub,

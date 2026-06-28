@@ -309,8 +309,8 @@ func (controller *Controller) critiqueDirective() string {
 }
 
 // recordTurn evaluates the turn's generated Go, appends the resulting
-// ControllerTurn to the session history, and emits the turn's reasoning as a trace
-// event. The turn index is the current history length, so it stays unique and
+// ControllerTurn to the session history, and emits the turn's reasoning as a
+// thinking trace event. The turn index is the current history length, so it stays unique and
 // monotonic even when RunAudited re-enters Run for a §5 revision pass against a
 // history that already holds the earlier turns. An evaluation fault — including a
 // recovered over-budget agent.Query panic — is recorded on the turn rather than
@@ -326,7 +326,7 @@ func (controller *Controller) recordTurn(response openai.ControllerResponse) {
 		newControllerTurn(index, response, result, evalErr),
 	)
 
-	controller.session.Emitter.Turn(response.Thinking)
+	controller.session.Emitter.Thinking(response.Thinking)
 }
 
 // evalTurn runs the turn's generated Go through the interpreter, recovering an
