@@ -224,7 +224,7 @@ func newClientServing(t *testing.T, status int, body string) (*openai.Client, *m
 // outgoing request body during RoundTrip, returning that raw body so a test can
 // assert on what actually went over the wire (model id, token caps, schema, framed
 // input). canned is the success stream the call receives, call issues the role call
-// against the built client, and opts tune the client. The controller, sub and judge
+// against the built client, and opts tune the client. The controller and sub
 // request-shape tests share it.
 func captureRequest(t *testing.T, canned string, call func(client *openai.Client) error, opts ...openai.Option) []byte {
 	t.Helper()
@@ -259,7 +259,7 @@ func captureRequest(t *testing.T, canned string, call func(client *openai.Client
 
 // modelNotFoundBody is the Responses API error body returned when the key lacks
 // gpt-5.5 access — the no-fallback contract's trigger — hoisted here so the
-// controller, sub and judge model-not-found tests assert against one wire payload.
+// controller and sub model-not-found tests assert against one wire payload.
 const modelNotFoundBody = `{"error":{"message":"The model gpt-5.5 does not exist or you do not have access to it.",` +
 	`"type":"invalid_request_error","param":null,"code":"model_not_found"}}`
 

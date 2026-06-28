@@ -17,7 +17,7 @@ func TestDefaultThemeColorsAreNonZero(t *testing.T) {
 		theme.Text, theme.Accent, theme.Success, theme.Warning, theme.Dim,
 		theme.Muted, theme.Border, theme.DiffAdd, theme.DiffDel,
 		theme.UserMessageBg, theme.ToolPendingBg, theme.ToolSuccessBg,
-		theme.ToolErrorBg, theme.ToolReviseBg, theme.ThinkingText,
+		theme.ToolErrorBg, theme.ThinkingText,
 	}
 
 	for index, color := range colors {

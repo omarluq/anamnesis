@@ -18,8 +18,6 @@ func TestTraceKindStringValues(t *testing.T) {
 	assert.Equal(t, "code-end", string(TraceKindCodeEnd))
 	assert.Equal(t, "query-start", string(TraceKindQueryStart))
 	assert.Equal(t, "query-end", string(TraceKindQueryEnd))
-	assert.Equal(t, "judge-start", string(TraceKindJudgeStart))
-	assert.Equal(t, "judge-end", string(TraceKindJudgeEnd))
 	assert.Equal(t, "final", string(TraceKindFinal))
 }
 

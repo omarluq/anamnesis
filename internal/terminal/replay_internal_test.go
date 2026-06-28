@@ -42,7 +42,7 @@ func TestReplayControllerReplaysScriptStampedWithRunID(t *testing.T) {
 		traceDepthEvent(TraceKindFinal, "done", 0),
 	}, 0)
 
-	events := controller.Start(context.Background(), "ignored query", 7)
+	events := controller.Start(context.Background(), "ignored query", "", 7)
 	got := drainTrace(t, events)
 
 	require.Len(t, got, 2, "every scripted event is replayed before the channel closes")
@@ -62,8 +62,8 @@ func TestReplayControllerLeavesScriptUnmutatedAcrossRuns(t *testing.T) {
 		traceDepthEvent(TraceKindFinal, "done", 0),
 	}, 0)
 
-	first := drainTrace(t, controller.Start(context.Background(), "q", 1))
-	second := drainTrace(t, controller.Start(context.Background(), "q", 2))
+	first := drainTrace(t, controller.Start(context.Background(), "q", "", 1))
+	second := drainTrace(t, controller.Start(context.Background(), "q", "", 2))
 
 	require.Len(t, first, 1)
 	require.Len(t, second, 1)
@@ -83,7 +83,7 @@ func TestReplayControllerAbandonsRunOnContextCancel(t *testing.T) {
 		traceDepthEvent(TraceKindFinal, "done", 0),
 	}, time.Hour)
 
-	got := drainTrace(t, controller.Start(ctx, "q", 1))
+	got := drainTrace(t, controller.Start(ctx, "q", "", 1))
 
 	assert.Empty(t, got, "a canceled context abandons the run before any event lands")
 }
@@ -98,7 +98,7 @@ func TestReplayControllerDeliversEventsUnderPace(t *testing.T) {
 	}, pace)
 
 	start := time.Now()
-	got := drainTrace(t, controller.Start(context.Background(), "q", 1))
+	got := drainTrace(t, controller.Start(context.Background(), "q", "", 1))
 	elapsed := time.Since(start)
 
 	assert.GreaterOrEqual(t, elapsed, 2*pace, "paced delivery waits a beat before each event")

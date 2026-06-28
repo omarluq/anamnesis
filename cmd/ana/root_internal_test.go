@@ -30,11 +30,9 @@ const (
 
 	keyReasoningController = "reasoning.controller"
 	keyReasoningSub        = "reasoning.sub"
-	keyReasoningJudge      = "reasoning.judge"
 
 	valReasoningController = "medium"
 	valReasoningSub        = "low"
-	valReasoningJudge      = "medium"
 )
 
 func TestRootCmdHelpListsCommands(t *testing.T) {
@@ -111,7 +109,6 @@ func TestConfigEntries(t *testing.T) {
 		Reasoning: config.ReasoningConfig{
 			Controller: valReasoningController,
 			Sub:        valReasoningSub,
-			Judge:      valReasoningJudge,
 		},
 	}
 
@@ -127,7 +124,6 @@ func TestConfigEntries(t *testing.T) {
 		keyLogFile:             valLogFile,
 		keyReasoningController: valReasoningController,
 		keyReasoningSub:        valReasoningSub,
-		keyReasoningJudge:      valReasoningJudge,
 	}, lookup)
 }
 

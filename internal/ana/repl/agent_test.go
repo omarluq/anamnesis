@@ -131,6 +131,63 @@ len(cited)`
 	journalSurface.AssertCalled(t, "Query", mock.Anything)
 }
 
+// TestAgentCiteToleratesLabelAndPreservesFinal proves the fix for the controller's
+// recurring agent.Cite misuse: calling agent.Cite with a leading label string
+// (agent.Cite("label", entries)) no longer panics — it cites the entries and ignores
+// the label — so an agent.FINAL that follows in the SAME code block still runs and
+// records the terminal answer instead of being skipped by an aborting panic.
+func TestAgentCiteToleratesLabelAndPreservesFinal(t *testing.T) {
+	t.Parallel()
+
+	interpreter := repl.NewInterpreter()
+
+	entries := []journal.Entry{
+		citedEntry("s=cursor-cite-1", "Out of memory: Killed process"),
+	}
+
+	journalSurface := new(repltest.MockJournal)
+	journalSurface.On("Query", mock.Anything).Return(entries)
+
+	deps := repl.HostDeps{Journal: journalSurface, Systemd: new(repltest.MockSystemd)}
+	require.NoError(t, deps.Register(interpreter))
+
+	sink := new(mockCitationSink)
+	sink.On("Cite", entries).Return()
+	repl.RegisterAgent(interpreter, sink)
+
+	const src = `cited := journal.Query(&journal.QueryFilter{Unit: "ssh.service"})
+agent.Cite("failed_units", cited)
+agent.FINAL("nginx was OOM-killed")`
+
+	_, err := interpreter.Eval("turn_0", src)
+	require.NoError(t, err, "a labeled agent.Cite must not panic the turn")
+
+	sink.AssertCalled(t, "Cite", entries)
+
+	answer, ok := interpreter.Final()
+	require.True(t, ok, "the agent.FINAL after a labeled Cite must still record the answer")
+	assert.Equal(t, "nginx was OOM-killed", answer)
+}
+
+// TestAgentCiteIgnoresNonJournalArguments proves agent.Cite tolerates arguments that
+// carry no citable journal cursor — a bare label, a number, a systemd value — by
+// citing nothing rather than panicking, so a malformed call degrades gracefully.
+func TestAgentCiteIgnoresNonJournalArguments(t *testing.T) {
+	t.Parallel()
+
+	interpreter := repl.NewInterpreter()
+	deps := repl.HostDeps{Journal: new(repltest.MockJournal), Systemd: new(repltest.MockSystemd)}
+	require.NoError(t, deps.Register(interpreter))
+
+	sink := new(mockCitationSink)
+	repl.RegisterAgent(interpreter, sink)
+
+	_, err := interpreter.Eval("turn_0", `agent.Cite("just a label", 42)`)
+	require.NoError(t, err, "a Cite with no journal entries must not panic")
+
+	sink.AssertNotCalled(t, "Cite")
+}
+
 // TestAgentFinalVarDegradesWhenVariableUnresolvable proves a FINAL_VAR whose name
 // cannot be evaluated degrades to "no answer" rather than panicking. The mvm engine
 // resolves a bare undefined identifier shell-style to its own name, so the

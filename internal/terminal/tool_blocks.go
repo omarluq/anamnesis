@@ -124,17 +124,12 @@ func (app *App) renderExpandedQuery(width int, parsed parsedQuery, style tcell.S
 	return lines
 }
 
-// queryBlockStyle picks the box background from the block's state: pending, a
-// judge critique asking for a revision (amber — a critique is a revision directive,
-// not a failure), errored (red), or successfully completed (green). An approving
-// judge block carries the standing approved output, so it falls through to the
-// green success branch alongside a settled query.
+// queryBlockStyle picks the box background from the block's state: pending,
+// errored (red), or successfully completed (green).
 func queryBlockStyle(theme Theme, message chatMessage, parsed parsedQuery) tcell.Style {
 	switch {
 	case message.Pending:
 		return theme.bg(theme.ToolPendingBg)
-	case parsed.Name == judgeName && parsed.Output != judgeApprovedOutput:
-		return theme.bg(theme.ToolReviseBg)
 	case parsed.Error != "":
 		return theme.bg(theme.ToolErrorBg)
 	default:

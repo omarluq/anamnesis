@@ -17,6 +17,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      # anamnesis links libsystemd's sdjournal via cgo; without these the
+      # GoReleaser build (CGO_ENABLED=1, linux only) fails to compile/link.
+      - name: Install libsystemd
+        run: sudo apt-get update && sudo apt-get install -y libsystemd-dev pkg-config
+
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
@@ -30,4 +35,5 @@ jobs:
           version: "~> v2"
           args: release --clean
         env:
+          CGO_ENABLED: "1"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

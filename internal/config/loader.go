@@ -47,10 +47,9 @@ func setDefaults(viperInstance *viper.Viper) {
 	viperInstance.SetDefault("app.env", envDevelopment)
 	viperInstance.SetDefault("logging.level", "info")
 	viperInstance.SetDefault("logging.format", "pretty")
-	// Reasoning defaults favor turn latency over maximum effort: the controller and
-	// judge reason at medium, the high-volume sub-calls at low. Each is overridable
-	// per role via config or the ANAMNESIS_REASONING_* env vars.
+	// Reasoning defaults favor turn latency over maximum effort: the controller
+	// reasons at medium, the high-volume sub-calls at low. Each is overridable per
+	// role via config or the ANAMNESIS_REASONING_* env vars.
 	viperInstance.SetDefault("reasoning.controller", effortMedium)
 	viperInstance.SetDefault("reasoning.sub", effortLow)
-	viperInstance.SetDefault("reasoning.judge", effortMedium)
 }

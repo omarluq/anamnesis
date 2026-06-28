@@ -4,24 +4,23 @@ import (
 	"context"
 
 	"github.com/samber/do/v2"
-	"github.com/samber/lo"
 
 	"github.com/omarluq/anamnesis/internal/ana/rlm"
 	"github.com/omarluq/anamnesis/internal/openai"
 )
 
-// newOpenAIClient constructs the OpenAI API client the three RLM collaborators
-// issue their controller, sub-LLM, and judge calls through. It resolves the
-// per-role reasoning efforts from the loaded config (each ParseEffort maps the
-// configured tier onto the SDK enum) and passes them to the client, so each role's
-// effort is config-driven rather than hardcoded. The API key is read from the
-// environment (openai.NewClient's OPENAI_API_KEY lookup); construction issues no
-// network call. The provider is lazy, so the container assembles and the
-// collaborators resolve with no live call and no key present — the gpt-5.5 path
-// stays gated behind the key, which a missing value fails on the first model call
-// rather than at container assembly. A ParseEffort failure cannot occur in practice
-// (config.Validate rejects unknown tiers at load) but surfaces as an oops config
-// error if an unvalidated value ever reaches here.
+// newOpenAIClient constructs the OpenAI API client the two RLM collaborators
+// issue their controller and sub-LLM calls through. It resolves the per-role
+// reasoning efforts from the loaded config (each ParseEffort maps the configured
+// tier onto the SDK enum) and passes them to the client, so each role's effort is
+// config-driven rather than hardcoded. The API key is read from the environment
+// (openai.NewClient's OPENAI_API_KEY lookup); construction issues no network call.
+// The provider is lazy, so the container assembles and the collaborators resolve
+// with no live call and no key present — the gpt-5.5 path stays gated behind the
+// key, which a missing value fails on the first model call rather than at container
+// assembly. A ParseEffort failure cannot occur in practice (config.Validate rejects
+// unknown tiers at load) but surfaces as an oops config error if an unvalidated
+// value ever reaches here.
 func newOpenAIClient(injector do.Injector) (*openai.Client, error) {
 	cfg := do.MustInvoke[*ConfigService](injector).Get()
 
@@ -35,15 +34,9 @@ func newOpenAIClient(injector do.Injector) (*openai.Client, error) {
 		return nil, err
 	}
 
-	judgeEffort, err := openai.ParseEffort(cfg.Reasoning.Judge)
-	if err != nil {
-		return nil, err
-	}
-
 	return openai.NewClient(
 		openai.WithControllerEffort(controllerEffort),
 		openai.WithSubEffort(subEffort),
-		openai.WithJudgeEffort(judgeEffort),
 	)
 }
 
@@ -148,55 +141,4 @@ func (adapter *subAdapter) Answer(ctx context.Context, prompt, evidence string) 
 	}
 
 	return result.Text, nil
-}
-
-// judgeAdapter adapts the OpenAI judge pass to the rlm.Judger seam the §5 audit
-// gate drives. The rlm seam carries the cited grounding as one rendered string and
-// reads an empty critique as approval, so the adapter wraps that string as the
-// judge's single cited block and collapses an approving verdict to the empty
-// critique, dropping the token usage the seam does not carry.
-type judgeAdapter struct {
-	// resolve lazily resolves the shared OpenAI client on the audit pass.
-	resolve clientResolver
-}
-
-// newJudgeAdapter binds injector into the rlm.Judger seam, resolving the OpenAI
-// client lazily so registering the collaborator never needs the key.
-func newJudgeAdapter(injector do.Injector) (rlm.Judger, error) {
-	return &judgeAdapter{resolve: newClientResolver(injector)}, nil
-}
-
-// compile-time assertion that judgeAdapter satisfies the rlm judge seam.
-var _ rlm.Judger = (*judgeAdapter)(nil)
-
-// Judge resolves the shared client and runs the one-shot audit over the answer,
-// wrapping the rendered cited transcript as the judge's single cited block — an
-// empty cited string ships no block, so the judge sees its explicit no-grounding
-// marker. It returns the empty critique on approval and the model's critique
-// otherwise, matching the seam's empty-means-approve contract.
-func (adapter *judgeAdapter) Judge(ctx context.Context, question, answer, cited string) (string, error) {
-	client, err := adapter.resolve()
-	if err != nil {
-		return "", err
-	}
-
-	result, err := client.Judge(ctx, question, answer, citedBlocks(cited))
-	if err != nil {
-		return "", err
-	}
-
-	if result.Verdict.Approve {
-		return "", nil
-	}
-
-	return result.Verdict.Critique, nil
-}
-
-// citedBlocks renders the rlm seam's single cited string as the judge's cited
-// entries, yielding an empty slice when nothing was cited so the judge input falls
-// back to its explicit no-grounding marker rather than a blank block.
-func citedBlocks(cited string) []string {
-	return lo.Filter([]string{cited}, func(entry string, _ int) bool {
-		return entry != ""
-	})
 }

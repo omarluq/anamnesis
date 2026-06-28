@@ -8,7 +8,7 @@ import (
 )
 
 // ParseEffort resolves a case-insensitive reasoning-effort name to the Responses
-// API enum the controller, sub-LLM, and judge calls pass under ReasoningParam. It
+// API enum the controller and sub-LLM calls pass under ReasoningParam. It
 // is the single source of truth mapping the configured effort string onto the SDK
 // value, accepting the same {none, minimal, low, medium, high, xhigh} set
 // config.Validate guards. An unknown name returns the zero effort and an oops error

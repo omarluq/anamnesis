@@ -33,10 +33,10 @@ interpreter against a tiny host API (`journal.*`, `systemd.*`, `agent.*`), and t
 only ever sees the **structured results its own code produced**. When a slice of the
 journal is too noisy to reason over directly, the code hands it to a **bounded sub-LLM
 call**, which can itself spin up a deeper investigation. Once the controller has an answer
-it emits a **cited `FINAL`**, and a separate **judge** model audits it against its evidence
-before it renders.
+it emits a **cited `FINAL`**, and every citation is checked against the evidence a real
+query actually surfaced before it renders.
 
-## Why journald + RLM + Go
+## Why journald + RLM
 
 There are a few opinions baked into this, and the combination is really the point.
 
@@ -78,7 +78,6 @@ flowchart TB
 
     subgraph ctl["internal/ana/rlm — the controller"]
         loop["turn loop: ask, run, observe<br/>runs until agent.FINAL"]
-        judge["judge gate: audit the answer,<br/>allow one revision"]
     end
 
     subgraph repl["internal/ana/repl — embedded mvm interpreter"]
@@ -91,7 +90,7 @@ flowchart TB
         agent["agent.Query / QueryBatched / Cite / FINAL"]
     end
 
-    model["internal/openai — gpt-5.5<br/>controller · sub · judge roles"]
+    model["internal/openai — gpt-5.5<br/>controller · sub roles"]
 
     user --> shell
     shell -->|query| loop
@@ -100,9 +99,7 @@ flowchart TB
     interp --> journal & systemd
     interp -->|"noisy slice, summarize it"| agent
     agent -->|"flat call or deeper loop"| model
-    loop --> judge
-    judge <--> model
-    judge -->|cited FINAL answer| shell
+    loop -->|cited FINAL answer| shell
     loop -.->|trace events| shell
 ```
 
@@ -121,7 +118,6 @@ sequenceDiagram
     participant M as gpt-5.5 (controller)
     participant I as mvm interpreter
     participant H as journal / systemd
-    participant J as gpt-5.5 (judge)
 
     loop until agent.FINAL
         C->>M: framed history, "what Go next?"
@@ -132,13 +128,15 @@ sequenceDiagram
         I-->>C: bounded stdout + return value
         Note over C: only the bounded result re-enters context
     end
-    C->>J: audit the FINAL answer against its citations
-    alt grounded
-        J-->>C: approve, then render
-    else critique
-        J-->>C: one revision pass, then render
-    end
+    Note over C: every citation checked against a real query result, then render
 ```
+
+Each question runs its own bounded investigation: a fresh interpreter (no REPL variables
+from the last question) and a fresh read of the live journal. What carries forward is a
+short preamble of your recent questions and `ana`'s answers, so a follow-up like _"and what
+about that ssh thing?"_ resolves against the earlier answer. Only the distilled answers
+cross over, never the raw per-turn output the loop works to keep out of context, and every
+new claim is still re-grounded against a fresh journal query.
 
 ### Recursion and fan-out
 
@@ -165,7 +163,7 @@ flowchart TB
 ### Trace and render
 
 The controller emits a stream of trace events: thinking, code start/end, each sub-call's
-start/end, the judge's verdict, the final answer. The terminal is a **passive observer**:
+start/end, and the final answer. The terminal is a **passive observer**:
 it drains those events off a channel and never blocks the controller. A small forwarding
 pump owns the channel lifecycle, so a sub-call still finishing after the run ends can't
 crash the UI; its late event just lands as a no-op. That's why you can watch a deep
@@ -191,8 +189,8 @@ Two run-time requirements:
 
 - The running user must be in the **`systemd-journal`** group to read the journal
   (`sudo usermod -aG systemd-journal "$USER"`, then re-login).
-- An **`OPENAI_API_KEY`** with **gpt-5.5** access. anamnesis uses `gpt-5.5` for every role
-  (controller, sub, and judge) with **no fallback**: if the key lacks access it fails
+- An **`OPENAI_API_KEY`** with **gpt-5.5** access. anamnesis uses `gpt-5.5` for both roles
+  (controller and sub) with **no fallback**: if the key lacks access it fails
   loudly rather than silently downgrading.
 
 ## Quickstart
@@ -250,7 +248,6 @@ turns that actually finish:
 | ---------------------- | -------------------------------- | -------- | -------------------------------- |
 | `reasoning.controller` | `ANAMNESIS_REASONING_CONTROLLER` | `medium` | the per-turn investigation brain |
 | `reasoning.sub`        | `ANAMNESIS_REASONING_SUB`        | `low`    | bounded, high-volume sub-calls   |
-| `reasoning.judge`      | `ANAMNESIS_REASONING_JUDGE`      | `medium` | the post-answer audit            |
 
 Each accepts `none`, `minimal`, `low`, `medium`, `high`, or `xhigh` (case-insensitive),
 validated at load. Want deeper reasoning at the cost of latency? Run
@@ -282,11 +279,11 @@ caches (`.gocache/`, `.gomodcache/`, `.tmp/`) are gitignored.
 cmd/ana/                 CLI entrypoint: chat, config, version
 internal/ana/rlm/        the controller loop, recursion, budget, trace emitter
 internal/ana/repl/       embedded mvm interpreter + the agent.* / host primitives
-internal/ana/scenarios/  the controller, sub, and judge system prompts
+internal/ana/scenarios/  the controller and sub system prompts
 internal/ana/journal/    journald reader over sdjournal (cgo)
 internal/ana/systemd/    unit status over dbus (pure Go)
-internal/ana/citations/  the grounding store the judge validates against
-internal/openai/         gpt-5.5 clients for the three roles + per-role effort
+internal/ana/citations/  the grounding store every cited cursor is checked against
+internal/openai/         gpt-5.5 clients for both roles + per-role effort
 internal/terminal/       the tcell chat UI, trace rendering, and the channel pump
 internal/tui/            the widget + markdown toolkit the UI is built on
 internal/config/         Viper config defaults, loading, and validation

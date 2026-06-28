@@ -51,18 +51,16 @@ type Config struct {
 	Reasoning ReasoningConfig `json:"reasoning" mapstructure:"reasoning" yaml:"reasoning" exhaustruct:"optional"`
 }
 
-// ReasoningConfig tunes how hard each model role reasons. SPEC §6/§14-16 run three
-// distinct gpt-5.5 roles — the controller turn loop, the bounded sub-LLM calls, and
-// the post-FINAL audit judge — and each pays its reasoning cost in turn latency, so
-// each is a separate knob. Higher tiers reason harder at the cost of slower turns;
-// the defaults (controller/judge medium, sub low) favor responsiveness over the
-// maximum-effort setting that made every turn take minutes. Each value is one of
-// validReasoningEfforts, case-insensitive, resolved to the SDK enum by
-// openai.ParseEffort.
+// ReasoningConfig tunes how hard each model role reasons. SPEC §6/§14 run two
+// distinct gpt-5.5 roles — the controller turn loop and the bounded sub-LLM calls —
+// and each pays its reasoning cost in turn latency, so each is a separate knob.
+// Higher tiers reason harder at the cost of slower turns; the defaults (controller
+// medium, sub low) favor responsiveness over the maximum-effort setting that made
+// every turn take minutes. Each value is one of validReasoningEfforts,
+// case-insensitive, resolved to the SDK enum by openai.ParseEffort.
 type ReasoningConfig struct {
 	Controller string `json:"controller" mapstructure:"controller" yaml:"controller"`
 	Sub        string `json:"sub" mapstructure:"sub" yaml:"sub"`
-	Judge      string `json:"judge" mapstructure:"judge" yaml:"judge"`
 }
 
 // AppConfig contains application identity and environment settings.
@@ -117,7 +115,6 @@ func (c *Config) validateReasoning() error {
 	}{
 		{field: "reasoning.controller", value: c.Reasoning.Controller},
 		{field: "reasoning.sub", value: c.Reasoning.Sub},
-		{field: "reasoning.judge", value: c.Reasoning.Judge},
 	}
 	for _, role := range roles {
 		if !lo.Contains(validReasoningEfforts, strings.ToLower(role.value)) {

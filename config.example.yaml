@@ -11,8 +11,7 @@ logging:
 #   none, minimal, low, medium, high, xhigh   (case-insensitive)
 # Higher tiers reason harder at the cost of slower turns. Defaults favor
 # responsiveness over the former maximum-effort setting. Override per role here or
-# via the ANAMNESIS_REASONING_CONTROLLER / _SUB / _JUDGE environment variables.
+# via the ANAMNESIS_REASONING_CONTROLLER / _SUB environment variables.
 reasoning:
   controller: medium  # the §6 investigation turn loop (the investigation brain)
   sub: low            # bounded, high-volume sub-LLM analysis calls
-  judge: medium       # the post-FINAL audit judge

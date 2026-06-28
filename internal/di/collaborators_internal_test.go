@@ -19,7 +19,7 @@ import (
 // OpenAI call, no journal or bus access, and no API key. It is the regression
 // guard the stub-controller capstone test missed: resolving terminal.Controller
 // alone left the collaborator graph unverified, so an unregistered ControllerLLM,
-// SubLLM, Judger, Journal, or Systemd surfaced only at submit time as a failed run.
+// SubLLM, Journal, or Systemd surfaced only at submit time as a failed run.
 // Covering the complete investigationDeps set keeps the guard honest: it now
 // breaks if any seam the per-submit graph resolves goes unregistered.
 func TestContainerResolvesChatControllerAndRLMCollaborators(t *testing.T) {
@@ -44,11 +44,6 @@ func TestContainerResolvesChatControllerAndRLMCollaborators(t *testing.T) {
 
 	require.NoError(t, err, "the sub-LLM collaborator resolves with no API key")
 	require.NotNil(t, subLLM)
-
-	judger, err := do.Invoke[rlm.Judger](container.injector)
-
-	require.NoError(t, err, "the judge collaborator resolves with no API key")
-	require.NotNil(t, judger)
 
 	journalSurface, err := do.Invoke[repl.Journal](container.injector)
 

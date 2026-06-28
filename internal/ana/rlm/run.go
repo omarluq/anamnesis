@@ -15,7 +15,7 @@ import (
 )
 
 // Deps carries the live collaborators one investigation is assembled from: the
-// three model seams the controller loop drives, the two host read surfaces the
+// two model seams the controller loop drives, the two host read surfaces the
 // interpreted code calls, and the trace channel the run publishes its progress
 // on. Investigate wires them into a controller spine; the zero value is not
 // usable because every collaborator must be supplied before a run begins.
@@ -24,8 +24,6 @@ type Deps struct {
 	Controller ControllerLLM
 	// Sub answers the recursive sub-calls agent.Query fans out.
 	Sub SubLLM
-	// Judge audits the final answer once before it renders.
-	Judge Judger
 	// Journal is the journal read surface exposed to interpreted code as the
 	// journal host package.
 	Journal repl.Journal
@@ -63,7 +61,6 @@ func (deps *Deps) validate() error {
 
 	missing := deps.Controller == nil ||
 		deps.Sub == nil ||
-		deps.Judge == nil ||
 		deps.Journal == nil ||
 		deps.Systemd == nil ||
 		deps.Events == nil
@@ -88,7 +85,9 @@ func (deps *Deps) validate() error {
 // builds the citation store, trace emitter, and shared tree-wide §6 budget, then
 // wires the root mvm REPL session over the host surfaces with a visibility-
 // recording journal and the recursive sub-call adapter, frames the controller with
-// the SPEC §14 system prompt, and drives the audited turn loop. The run carries no
+// the SPEC §14 system prompt, and drives the turn loop. A non-empty priorContext is
+// folded ahead of question so a follow-up resolves against earlier answers. The run
+// carries no
 // wall-clock or turn budget: it runs until the controller signals agent.FINAL, the
 // caller cancels ctx, or a turn's eval idles past its per-eval progress watchdog.
 // Investigate derives a cancelable child of ctx and cancels it on return, so a
@@ -96,10 +95,11 @@ func (deps *Deps) validate() error {
 // and sub-LLM calls rather than letting an abandoned subtree keep making paid model
 // calls. agent.Query is genuinely recursive: a sub-call above the leaf level spawns a
 // full child controller loop one level deeper, while the leaf falls back to a flat
-// base-case call, all sharing one budget. It returns the judge-approved final answer,
-// which it also publishes as the terminal trace event, or an oops error tagged with
-// the rlm domain when the session cannot be assembled or the loop fails.
-func Investigate(ctx context.Context, question string, deps *Deps) (string, error) {
+// base-case call, all sharing one budget. It returns the final answer — gated by the
+// §7/§10 citation check, so a fabricated citation fails the run — which it also
+// publishes as the terminal trace event, or an oops error tagged with the rlm domain
+// when the session cannot be assembled or the loop fails.
+func Investigate(ctx context.Context, question, priorContext string, deps *Deps) (string, error) {
 	if err := deps.validate(); err != nil {
 		return "", err
 	}
@@ -139,18 +139,17 @@ func Investigate(ctx context.Context, question string, deps *Deps) (string, erro
 	session := Session{
 		Controller:   deps.Controller,
 		Sub:          deps.Sub,
-		Judge:        deps.Judge,
 		Budget:       budget,
 		Store:        store,
 		Emitter:      emitter,
-		Question:     question,
+		Question:     composeQuestion(priorContext, question),
 		SystemPrompt: scenarios.ControllerSystemPrompt,
 		History:      nil,
 	}
 
 	controller := NewController(&session, interpreter)
 
-	answer, err := controller.RunAudited(ctx)
+	answer, err := controller.Run(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -169,6 +168,19 @@ func Investigate(ctx context.Context, question string, deps *Deps) (string, erro
 	emitter.Final(answer)
 
 	return answer, nil
+}
+
+// composeQuestion folds the prior-conversation preamble ahead of the user's
+// question so a follow-up can resolve references to an earlier answer, while
+// keeping the run otherwise cold: the preamble carries only distilled prior
+// answers, never interpreter state or raw REPL output. It returns the bare
+// question when priorContext is empty — the first question of a session.
+func composeQuestion(priorContext, question string) string {
+	if priorContext == "" {
+		return question
+	}
+
+	return priorContext + "\n\n" + question
 }
 
 // newTreeBudget builds the shared, tree-wide §6 budget for one investigation. The

@@ -251,55 +251,6 @@ func TestApplyTraceQueryEndsCorrelateByQueryID(t *testing.T) {
 	assert.Equal(t, "answer B", parsedB.Output, "B's result lands on B's block")
 }
 
-// TestApplyTraceJudgeApprovalRendersGreen drives the §16 judge block through an
-// approval: a JudgeStart opens a pending agent.Judge block, and an empty JudgeEnd
-// settles it to the standing approved line, painted with the green success
-// background a settled query shares.
-func TestApplyTraceJudgeApprovalRendersGreen(t *testing.T) {
-	t.Parallel()
-
-	app := newTestApp()
-
-	app.applyTrace(traceEvent(TraceKindJudgeStart, "the resolved answer", 0))
-
-	require.Len(t, app.history, 1)
-	pending := app.history[0]
-	assert.Equal(t, transcript.RoleToolResult, pending.Role, "a judge start opens a tool-result block")
-	require.True(t, pending.Pending, "the judge block is pending until its end")
-	assert.True(t, app.working, "a judge start marks the shell working")
-	assert.Equal(t, judgeName, parseQueryContent(pending.Content).Name, "the block is labeled agent.Judge")
-
-	app.applyTrace(traceEvent(TraceKindJudgeEnd, "", 0))
-
-	settled := app.history[0]
-	require.False(t, settled.Pending, "an empty critique settles the judge block")
-	parsed := parseQueryContent(settled.Content)
-	assert.Equal(t, judgeApprovedOutput, parsed.Output, "approval renders the standing approved line")
-	assert.Equal(t, app.theme.bg(app.theme.ToolSuccessBg), queryBlockStyle(app.theme, settled, parsed),
-		"an approving judge block paints green")
-}
-
-// TestApplyTraceJudgeCritiqueRendersAmberNotRed proves a judge critique settles the
-// block to the critique text in amber — a revision directive, distinct from the red
-// of an outright failure.
-func TestApplyTraceJudgeCritiqueRendersAmberNotRed(t *testing.T) {
-	t.Parallel()
-
-	app := newTestApp()
-
-	app.applyTrace(traceEvent(TraceKindJudgeStart, "the resolved answer", 0))
-	app.applyTrace(traceEvent(TraceKindJudgeEnd, "cite the boot the panic came from", 0))
-
-	settled := app.history[0]
-	require.False(t, settled.Pending)
-	parsed := parseQueryContent(settled.Content)
-	assert.Equal(t, "cite the boot the panic came from", parsed.Output, "the critique text settles the block")
-
-	style := queryBlockStyle(app.theme, settled, parsed)
-	assert.Equal(t, app.theme.bg(app.theme.ToolReviseBg), style, "a critique paints amber, a revision directive")
-	assert.NotEqual(t, app.theme.bg(app.theme.ToolErrorBg), style, "a critique is not a failure, so never red")
-}
-
 func TestQueryToggleRevealsContentWithThinkingAlwaysShown(t *testing.T) {
 	t.Parallel()
 
@@ -327,7 +278,7 @@ func TestStartRunBeginsControllerRunAndIgnoresSubmitWhileWorking(t *testing.T) {
 	t.Parallel()
 
 	ctrl := new(mockController)
-	ctrl.On("Start", mock.Anything, "first question", uint64(1)).
+	ctrl.On("Start", mock.Anything, "first question", mock.Anything, uint64(1)).
 		Return(scriptedTrace(1, traceEvent(TraceKindThinking, "looking", 0))).
 		Once()
 
@@ -347,7 +298,7 @@ func TestStartRunBeginsControllerRunAndIgnoresSubmitWhileWorking(t *testing.T) {
 	assert.Equal(t, uint64(1), app.runID, "a submit while working does not start a new run")
 
 	ctrl.AssertExpectations(t)
-	ctrl.AssertNotCalled(t, "Start", mock.Anything, "second question", mock.Anything)
+	ctrl.AssertNotCalled(t, "Start", mock.Anything, "second question", mock.Anything, mock.Anything)
 }
 
 func TestStartRunWithoutControllerStaysIdle(t *testing.T) {
@@ -372,7 +323,7 @@ func TestStartRunCancelsRunContextOnLoopExit(t *testing.T) {
 	capturedCtx := make(chan context.Context, 1)
 
 	ctrl := new(mockController)
-	ctrl.On("Start", mock.Anything, "why did it crash", uint64(1)).
+	ctrl.On("Start", mock.Anything, "why did it crash", mock.Anything, uint64(1)).
 		Run(func(args mock.Arguments) {
 			if runCtx, ok := args.Get(0).(context.Context); ok {
 				capturedCtx <- runCtx

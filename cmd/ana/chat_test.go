@@ -40,11 +40,15 @@ type mockChatController struct {
 	mock.Mock
 }
 
-// Start records the (query, runID) it was driven with and replays the scripted
-// channel configured via .On("Start", ...).Return(channel), so the test both
-// asserts the submit lifecycle and feeds scripted trace events back to the drain.
-func (m *mockChatController) Start(ctx context.Context, query string, runID uint64) <-chan terminal.TraceEvent {
-	args := m.Called(ctx, query, runID)
+// Start records the (query, priorContext, runID) it was driven with and replays the
+// scripted channel configured via .On("Start", ...).Return(channel), so the test
+// both asserts the submit lifecycle and feeds scripted trace events back to the drain.
+func (m *mockChatController) Start(
+	ctx context.Context,
+	query, priorContext string,
+	runID uint64,
+) <-chan terminal.TraceEvent {
+	args := m.Called(ctx, query, priorContext, runID)
 
 	channel, ok := args.Get(0).(<-chan terminal.TraceEvent)
 	if !ok {
@@ -100,7 +104,7 @@ func TestRunChatWithDrivesControllerToFinal(t *testing.T) {
 		chatTrace(terminal.TraceKindThinking, chatTurnLine),
 		chatTrace(terminal.TraceKindFinal, chatFinalAnswer),
 	)
-	controller.On("Start", mock.Anything, chatQuery, chatRunID).Return(channel)
+	controller.On("Start", mock.Anything, chatQuery, mock.Anything, chatRunID).Return(channel)
 
 	var (
 		lines    []string
@@ -108,7 +112,7 @@ func TestRunChatWithDrivesControllerToFinal(t *testing.T) {
 	)
 
 	runner := func(ctx context.Context, opts terminal.RunOptions) error {
-		for event := range opts.Controller.Start(ctx, chatQuery, chatRunID) {
+		for event := range opts.Controller.Start(ctx, chatQuery, "", chatRunID) {
 			lines = append(lines, event.Text)
 
 			if event.Kind == terminal.TraceKindFinal {
@@ -122,7 +126,7 @@ func TestRunChatWithDrivesControllerToFinal(t *testing.T) {
 	require.NoError(t, runChatWith(context.Background(), controller, runner))
 	assert.Equal(t, chatFinalAnswer, rendered, "the FINAL answer reaches the drain")
 	assert.Contains(t, lines, chatTurnLine, "a real trace turn reaches the drain, not an echoed line")
-	controller.AssertCalled(t, "Start", mock.Anything, chatQuery, chatRunID)
+	controller.AssertCalled(t, "Start", mock.Anything, chatQuery, mock.Anything, chatRunID)
 	controller.AssertExpectations(t)
 }
 

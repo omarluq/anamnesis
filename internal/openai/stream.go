@@ -27,7 +27,7 @@ const (
 // reply from its Server-Sent-Events: it accumulates output_text deltas into output
 // and reasoning_summary deltas into reasoning, invoking onReasoning per reasoning
 // delta when it is non-nil so a UI can render thinking as it arrives. role names
-// the calling layer (controller, sub, judge) so the two failure modes surface under
+// the calling layer (controller, sub) so the two failure modes surface under
 // role-scoped oops codes: a transport or protocol failure becomes role+"_call_failed"
 // and a reply the model could not finish — gpt-5.5 is a reasoning model whose hidden
 // reasoning is part of the response — becomes role+"_incomplete", the truncation guard

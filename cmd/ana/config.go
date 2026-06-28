@@ -123,7 +123,6 @@ func configEntries(cfg *config.Config) []configEntry {
 		{key: "logging.file", value: cfg.Logging.File},
 		{key: "reasoning.controller", value: cfg.Reasoning.Controller},
 		{key: "reasoning.sub", value: cfg.Reasoning.Sub},
-		{key: "reasoning.judge", value: cfg.Reasoning.Judge},
 	}
 }
 

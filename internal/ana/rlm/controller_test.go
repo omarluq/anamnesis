@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/omarluq/anamnesis/internal/ana/journal"
 	"github.com/omarluq/anamnesis/internal/ana/repl"
 	"github.com/omarluq/anamnesis/internal/ana/repl/repltest"
 	"github.com/omarluq/anamnesis/internal/ana/rlm"
@@ -105,6 +106,120 @@ func TestControllerRunErrorsWhenDoneWithoutTerminalAnswer(t *testing.T) {
 	repltest.RequireOopsCode(t, err, "rlm", "controller_missing_final")
 
 	assert.Empty(t, fixture.session.History)
+	fixture.controller.AssertExpectations(t)
+	eval.AssertExpectations(t)
+}
+
+func TestControllerRunRejectsFabricatedCitation(t *testing.T) {
+	t.Parallel()
+
+	// The §7/§10 citation grounding gate fails the run as the answer resolves: the
+	// controller cited a cursor no journal query returned this session, so
+	// Store.Validate rejects the answer and Run surfaces the fabricated cursor rather
+	// than rendering an ungrounded conclusion.
+	ctx := context.Background()
+	fixture := newSessionFixture()
+	eval := new(mockEvalCapture)
+	controller := rlm.NewController(&fixture.session, eval)
+
+	answer := "the leak traces to an uncited entry"
+	doneTurn := openai.ControllerResponse{Thinking: "report the finding", Code: "", Done: true}
+
+	fixture.session.Store.Cite([]journal.Entry{{
+		Timestamp: time.Time{},
+		Cursor:    "cur-ghost",
+		BootID:    "",
+		Unit:      "",
+		Comm:      "",
+		Hostname:  "",
+		Message:   "",
+		Priority:  0,
+		PID:       0,
+	}})
+
+	fixture.controller.
+		On("Respond", ctx, fixtureSystemPrompt, fixtureQuestion, "").
+		Return(doneTurn, nil).
+		Once()
+	eval.On("Final").Return(answer, true).Once()
+
+	got, err := controller.Run(ctx)
+	require.Error(t, err)
+	assert.Empty(t, got)
+	require.ErrorContains(t, err, "validate final citations")
+	require.ErrorContains(t, err, "cur-ghost")
+
+	fixture.controller.AssertExpectations(t)
+	eval.AssertExpectations(t)
+}
+
+func TestControllerRunRendersAnswerWithGroundedCitation(t *testing.T) {
+	t.Parallel()
+
+	// A citation grounded in a session-visible cursor passes the §7/§10 gate: Run
+	// renders the resolved answer rather than rejecting it, the companion to the
+	// fabricated-cursor rejection above.
+	ctx := context.Background()
+	fixture := newSessionFixture()
+	eval := new(mockEvalCapture)
+	controller := rlm.NewController(&fixture.session, eval)
+
+	answer := "checkout-api was OOM-killed under memory pressure"
+	doneTurn := openai.ControllerResponse{Thinking: "report the finding", Code: "", Done: true}
+
+	cited := citableEntry("cur-oom")
+	fixture.session.Store.RecordVisible([]journal.Entry{cited})
+	fixture.session.Store.Cite([]journal.Entry{cited})
+
+	fixture.controller.
+		On("Respond", ctx, fixtureSystemPrompt, fixtureQuestion, "").
+		Return(doneTurn, nil).
+		Once()
+	eval.On("Final").Return(answer, true).Once()
+
+	got, err := controller.Run(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, answer, got)
+
+	fixture.controller.AssertExpectations(t)
+	eval.AssertExpectations(t)
+}
+
+// TestControllerRunResolvesInlineFinalOnDoneTurn proves the fix for a model that
+// conflates the two-step ending by putting the agent.FINAL call in the very turn it
+// sets Done. The loop evaluates that turn's code before resolving, so the inline
+// agent.FINAL runs and records the answer instead of being skipped — the run returns
+// the answer rather than failing with "done without a terminal answer".
+func TestControllerRunResolvesInlineFinalOnDoneTurn(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	fixture := newSessionFixture()
+	eval := new(mockEvalCapture)
+	controller := rlm.NewController(&fixture.session, eval)
+
+	const code = `agent.FINAL("checkout-api was OOM-killed")`
+
+	answer := "checkout-api was OOM-killed"
+	inlineDoneTurn := openai.ControllerResponse{Thinking: "conclude inline", Code: code, Done: true}
+	wantTurn := rlm.ControllerTurn{Code: code, Stdout: "", Retval: "", Err: "", Index: 0}
+
+	fixture.controller.
+		On("Respond", ctx, fixtureSystemPrompt, fixtureQuestion, "").
+		Return(inlineDoneTurn, nil).
+		Once()
+	eval.On("EvalContext", ctx, fixture.session.Budget.PerEvalTimeout, "turn_0", code).
+		Return(repl.Result{Retval: reflect.Value{}, Stdout: ""}, nil).
+		Once()
+	eval.On("Final").Return(answer, true).Once()
+
+	got, err := controller.Run(ctx)
+	require.NoError(t, err, "an inline agent.FINAL on a Done turn must resolve, not fail")
+	assert.Equal(t, answer, got)
+
+	require.Len(t, fixture.session.History, 1, "the inline Done turn's code is evaluated and recorded")
+	assert.Equal(t, wantTurn, fixture.session.History[0])
+
 	fixture.controller.AssertExpectations(t)
 	eval.AssertExpectations(t)
 }

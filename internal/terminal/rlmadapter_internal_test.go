@@ -29,7 +29,7 @@ func TestRLMControllerLeakedEmitAfterTeardownDoesNotPanic(t *testing.T) {
 	// test, so it can drive a post-teardown emit on the very channel the run used.
 	captured := make(chan chan<- TraceEvent, 1)
 
-	investigate := func(_ context.Context, _ string, events chan<- TraceEvent, _ uint64) (string, error) {
+	investigate := func(_ context.Context, _, _ string, events chan<- TraceEvent, _ uint64) (string, error) {
 		captured <- events
 
 		events <- TraceEvent{
@@ -44,7 +44,7 @@ func TestRLMControllerLeakedEmitAfterTeardownDoesNotPanic(t *testing.T) {
 		return "root cause: oom-kill", nil
 	}
 
-	out := NewRLMController(investigate).Start(context.Background(), "why did boot 3 oom", runID)
+	out := NewRLMController(investigate).Start(context.Background(), "why did boot 3 oom", "", runID)
 
 	received := make([]TraceEvent, 0, 1)
 	for event := range out {
@@ -102,11 +102,11 @@ func TestRLMControllerEmitsFailureFinalThenCloses(t *testing.T) {
 	const runID = uint64(5)
 
 	wantErr := errors.New("assemble session: missing collaborator")
-	investigate := func(_ context.Context, _ string, _ chan<- TraceEvent, _ uint64) (string, error) {
+	investigate := func(_ context.Context, _, _ string, _ chan<- TraceEvent, _ uint64) (string, error) {
 		return "", wantErr
 	}
 
-	out := NewRLMController(investigate).Start(context.Background(), "why did boot 3 oom", runID)
+	out := NewRLMController(investigate).Start(context.Background(), "why did boot 3 oom", "", runID)
 
 	received := make([]TraceEvent, 0, 1)
 	for event := range out {

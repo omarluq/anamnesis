@@ -25,7 +25,6 @@ func TestSetDefaults(t *testing.T) {
 		{key: "logging.format", want: "pretty"},
 		{key: "reasoning.controller", want: effortMedium},
 		{key: "reasoning.sub", want: effortLow},
-		{key: "reasoning.judge", want: effortMedium},
 	}
 	for _, testCase := range defaults {
 		assert.Equal(t, testCase.want, viperInstance.GetString(testCase.key), testCase.key)

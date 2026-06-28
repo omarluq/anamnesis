@@ -129,8 +129,6 @@ func TestNewClientDefaultsReasoningEfforts(t *testing.T) {
 		"the controller defaults to medium effort")
 	assert.Equal(t, responses.ReasoningEffortLow, client.subEffort,
 		"the high-volume sub-calls default to low effort")
-	assert.Equal(t, responses.ReasoningEffortMedium, client.judgeEffort,
-		"the judge defaults to medium effort")
 }
 
 func TestEffortOptionsOverrideDefaults(t *testing.T) {
@@ -140,7 +138,6 @@ func TestEffortOptionsOverrideDefaults(t *testing.T) {
 		withLookupEnv(keyLookup("sk-present")),
 		WithControllerEffort(responses.ReasoningEffortXhigh),
 		WithSubEffort(responses.ReasoningEffortHigh),
-		WithJudgeEffort(responses.ReasoningEffortMinimal),
 	)
 	require.NoError(t, err)
 
@@ -148,8 +145,6 @@ func TestEffortOptionsOverrideDefaults(t *testing.T) {
 		"WithControllerEffort overrides the controller default")
 	assert.Equal(t, responses.ReasoningEffortHigh, client.subEffort,
 		"WithSubEffort overrides the sub default")
-	assert.Equal(t, responses.ReasoningEffortMinimal, client.judgeEffort,
-		"WithJudgeEffort overrides the judge default")
 }
 
 func TestNewClientRequestCarriesBearerKeyAndBaseURL(t *testing.T) {

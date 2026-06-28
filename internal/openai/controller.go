@@ -86,8 +86,7 @@ func (client *Client) Controller(
 // constrains a reply to T's JSON schema, with strict adherence enabled so the
 // model cannot return fields outside the schema. name is the schema name the API
 // echoes back and code is the oops code a schema-build failure surfaces under. The
-// controller and judge roles share it so the structured-output wiring lives in one
-// place.
+// controller role uses it, keeping the structured-output wiring in one place.
 func structuredFormat[T any](name, code string) (responses.ResponseFormatTextConfigUnionParam, error) {
 	schema, err := GenerateSchema[T]()
 	if err != nil {
@@ -109,7 +108,7 @@ func structuredFormat[T any](name, code string) (responses.ResponseFormatTextCon
 // decodeStructured parses a model's structured JSON reply (the Responses output
 // text) into T, wrapping a decode failure as an oops error under code so a
 // malformed reply surfaces in the openai domain rather than as a bare
-// encoding/json error. The controller and judge roles share it.
+// encoding/json error. The controller role uses it.
 //
 // It decodes the first complete JSON value rather than json.Unmarshal-ing the
 // whole string: resp.OutputText concatenates the output_text of every output

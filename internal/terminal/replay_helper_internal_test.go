@@ -35,8 +35,9 @@ var _ Controller = (*replayController)(nil)
 // Start launches a goroutine that replays the scripted events for the run
 // identified by runID and returns the channel the shell drains until the script is
 // exhausted or ctx is canceled. The query is ignored on purpose: an offline replay
-// answers every prompt with the same canned investigation transcript.
-func (controller *replayController) Start(ctx context.Context, _ string, runID uint64) <-chan TraceEvent {
+// answers every prompt with the same canned investigation transcript, so both the
+// query and the prior-conversation preamble are ignored.
+func (controller *replayController) Start(ctx context.Context, _, _ string, runID uint64) <-chan TraceEvent {
 	out := make(chan TraceEvent)
 	go controller.replay(ctx, out, runID)
 

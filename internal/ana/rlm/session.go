@@ -35,18 +35,7 @@ type SubLLM interface {
 	Answer(ctx context.Context, prompt, evidence string) (string, error)
 }
 
-// Judger is the audit seam that reviews a finished investigation once, after the
-// controller calls agent.FINAL but before the answer renders. The rlm package
-// owns this interface; the openai judge layer satisfies it structurally.
-type Judger interface {
-	// Judge reviews the final answer to question against the rendered cited
-	// entries, returning an empty critique to approve the answer or a short
-	// critique describing what to fix. It returns an error when the model call
-	// fails.
-	Judge(ctx context.Context, question, answer, cited string) (string, error)
-}
-
-// Session is the controller spine for one investigation: the three model
+// Session is the controller spine for one investigation: the two model
 // collaborators the loop drives plus the budget, citation store, trace emitter,
 // turn history, and the prompts that frame every controller call. It is a plain
 // aggregate the controller loop operates on; the zero value is not usable
@@ -56,8 +45,6 @@ type Session struct {
 	Controller ControllerLLM
 	// Sub answers the recursive sub-calls agent.Query fans out.
 	Sub SubLLM
-	// Judge audits the final answer once before it renders.
-	Judge Judger
 	// Budget enforces the turn, depth, and sub-call hard limits in code.
 	Budget *Budget
 	// Store tracks session-visible cursors and validates the final citations.

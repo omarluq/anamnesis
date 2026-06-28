@@ -25,7 +25,6 @@ const (
 	hexToolPendingBg = 0x282832
 	hexToolSuccessBg = 0x283228
 	hexToolErrorBg   = 0x3c2828
-	hexToolReviseBg  = 0x3c3428
 	hexThinkingText  = 0x808080
 )
 
@@ -49,9 +48,6 @@ type Theme struct {
 	ToolSuccessBg tcell.Color
 	// ToolErrorBg backs a failed query block.
 	ToolErrorBg tcell.Color
-	// ToolReviseBg backs a judge block whose critique asks for a revision: amber, a
-	// "needs work" signal distinct from the red of an outright failure.
-	ToolReviseBg tcell.Color
 	// ThinkingText is the dim foreground of collapsed/expanded thinking blocks.
 	ThinkingText tcell.Color
 }
@@ -73,7 +69,6 @@ func DefaultTheme() Theme {
 		ToolPendingBg: tcell.NewHexColor(hexToolPendingBg),
 		ToolSuccessBg: tcell.NewHexColor(hexToolSuccessBg),
 		ToolErrorBg:   tcell.NewHexColor(hexToolErrorBg),
-		ToolReviseBg:  tcell.NewHexColor(hexToolReviseBg),
 		ThinkingText:  tcell.NewHexColor(hexThinkingText),
 	}
 }
