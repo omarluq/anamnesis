@@ -141,7 +141,13 @@ func TestInvestigateSharedBudgetCapsSubCallsTreeWide(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, got, "sub-investigation skipped",
 		"the child's sub-call finds the shared budget already spent and degrades to text")
+	// The child controller loop must actually run for the budget to be observed as
+	// exhausted one level down: the SubControllerPrompt Respond proves the root spent
+	// the single sub-call before degradation, not that the root degraded too early.
+	controllerLLM.AssertCalled(t, "Respond", mock.Anything, scenarios.SubControllerPrompt,
+		mock.Anything, mock.Anything)
 	sub.AssertNotCalled(t, "Answer")
+	judge.AssertExpectations(t)
 }
 
 // TestInvestigateQueryBatchedFanOutRacesCleanly drives a wide agent.QueryBatched
@@ -219,11 +225,13 @@ func TestInvestigateRecursiveFanOutKeepsEveryBranch(t *testing.T) {
 	// first turn frames an empty history, and its done turn frames a non-empty one.
 	controllerLLM.
 		On("Respond", mock.Anything, scenarios.SubControllerPrompt, mock.Anything, "").
-		Return(childTurn, nil)
+		Return(childTurn, nil).
+		Times(fanOut)
 	controllerLLM.
 		On("Respond", mock.Anything, scenarios.SubControllerPrompt, mock.Anything,
 			mock.MatchedBy(func(history string) bool { return history != "" })).
-		Return(childDone, nil)
+		Return(childDone, nil).
+		Times(fanOut)
 	sub.On("Answer", mock.Anything, "leaf question", "[x]").Return("ok", nil)
 	judge.On("Judge", mock.Anything, question, "ok", mock.Anything).Return("", nil).Once()
 
