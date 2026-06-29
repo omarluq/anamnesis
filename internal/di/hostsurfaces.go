@@ -23,6 +23,24 @@ func logSurfaceErr(surface, op string, err error) {
 	)
 }
 
+// surfaceRead forwards a host-surface read, returning the client result on success and
+// the zero value (nil slice/map, zero struct) on failure after logging the swallowed
+// error via logSurfaceErr. It is the single seam where every journal.* and systemd.*
+// surface method turns an error-returning client read into the error-free, empty-on-
+// failure result the interpreter reads as "no records" rather than a propagated error.
+func surfaceRead[T any](surface, op string, read func() (T, error)) T {
+	result, err := read()
+	if err != nil {
+		logSurfaceErr(surface, op, err)
+
+		var zero T
+
+		return zero
+	}
+
+	return result
+}
+
 // newJournalSurface provides the journal read surface investigationDeps resolves
 // per submit, backed by the sdjournal-reading journal.Client. The provider is lazy
 // like newOpenAIClient: journal.NewClient opens no journal handle, so the surface
@@ -49,50 +67,28 @@ var _ repl.Journal = (*journalSurface)(nil)
 
 // Boots forwards to the client, returning the empty boot list when the read fails.
 func (surface *journalSurface) Boots() []journal.BootInfo {
-	boots, err := surface.client.Boots()
-	if err != nil {
-		logSurfaceErr("journal", "Boots", err)
-
-		return nil
-	}
-
-	return boots
+	return surfaceRead("journal", "Boots", surface.client.Boots)
 }
 
 // Query forwards to the client, returning the empty entry list when the read fails.
 func (surface *journalSurface) Query(filter *journal.QueryFilter) []journal.Entry {
-	entries, err := surface.client.Query(filter)
-	if err != nil {
-		logSurfaceErr("journal", "Query", err)
-
-		return nil
-	}
-
-	return entries
+	return surfaceRead("journal", "Query", func() ([]journal.Entry, error) {
+		return surface.client.Query(filter)
+	})
 }
 
 // Counts forwards to the client, returning the empty histogram when the read fails.
 func (surface *journalSurface) Counts(bootID, byField string) map[string]int {
-	counts, err := surface.client.Counts(bootID, byField)
-	if err != nil {
-		logSurfaceErr("journal", "Counts", err)
-
-		return nil
-	}
-
-	return counts
+	return surfaceRead("journal", "Counts", func() (map[string]int, error) {
+		return surface.client.Counts(bootID, byField)
+	})
 }
 
 // Unique forwards to the client, returning the empty value set when the read fails.
 func (surface *journalSurface) Unique(field string, filter *journal.QueryFilter) []string {
-	values, err := surface.client.Unique(field, filter)
-	if err != nil {
-		logSurfaceErr("journal", "Unique", err)
-
-		return nil
-	}
-
-	return values
+	return surfaceRead("journal", "Unique", func() ([]string, error) {
+		return surface.client.Unique(field, filter)
+	})
 }
 
 // newSystemdSurface provides the systemd read surface investigationDeps resolves
@@ -120,26 +116,14 @@ var _ repl.Systemd = (*systemdSurface)(nil)
 
 // UnitStatus forwards to the client, returning the zero status when the read fails.
 func (surface *systemdSurface) UnitStatus(name string) systemd.UnitStatus {
-	status, err := surface.client.UnitStatus(context.Background(), name)
-	if err != nil {
-		logSurfaceErr("systemd", "UnitStatus", err)
-
-		var empty systemd.UnitStatus
-
-		return empty
-	}
-
-	return status
+	return surfaceRead("systemd", "UnitStatus", func() (systemd.UnitStatus, error) {
+		return surface.client.UnitStatus(context.Background(), name)
+	})
 }
 
 // ListUnits forwards to the client, returning the empty listing when the read fails.
 func (surface *systemdSurface) ListUnits(state string) []systemd.Unit {
-	units, err := surface.client.ListUnits(context.Background(), state)
-	if err != nil {
-		logSurfaceErr("systemd", "ListUnits", err)
-
-		return nil
-	}
-
-	return units
+	return surfaceRead("systemd", "ListUnits", func() ([]systemd.Unit, error) {
+		return surface.client.ListUnits(context.Background(), state)
+	})
 }

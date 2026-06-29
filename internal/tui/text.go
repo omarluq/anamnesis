@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"strconv"
 	"strings"
 
 	"github.com/clipperhouse/displaywidth"
@@ -233,11 +232,6 @@ func JoinSegments(segments []Segment) string {
 	}
 
 	return builder.String()
-}
-
-// Int formats value in base 10.
-func Int(value int) string {
-	return strconv.Itoa(value)
 }
 
 // DrawLine draws a styled line clipped to rect width.
