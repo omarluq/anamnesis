@@ -66,7 +66,16 @@ func (deps HostDeps) Register(interpreter *Interpreter) error {
 // journal value types as the interpreted journal package, so source can both call
 // the read methods and write journal.QueryFilter literals to drive Query.
 func (deps HostDeps) registerJournal(interpreter *Interpreter) error {
-	symbols, err := surfaceFuncs("journal", reflect.TypeFor[Journal](), reflect.ValueOf(deps.Journal))
+	// Validate the raw surface before the progress decorator wraps it: progressJournal is
+	// a non-nil struct, so a nil deps.Journal would otherwise slip past surfaceFuncs's nil
+	// guard and panic on first use instead of failing loudly here.
+	if err := surfaceNotNil("journal", reflect.ValueOf(deps.Journal)); err != nil {
+		return err
+	}
+
+	surface := progressJournal{interpreter: interpreter, delegate: deps.Journal}
+
+	symbols, err := surfaceFuncs("journal", reflect.TypeFor[Journal](), reflect.ValueOf(surface))
 	if err != nil {
 		return err
 	}
@@ -91,7 +100,15 @@ func (deps HostDeps) registerJournal(interpreter *Interpreter) error {
 // the package symbol table, so source reads a returned UnitStatus's fields by
 // reflection without ever naming the type. Unit has no such collision.
 func (deps HostDeps) registerSystemd(interpreter *Interpreter) error {
-	symbols, err := surfaceFuncs("systemd", reflect.TypeFor[Systemd](), reflect.ValueOf(deps.Systemd))
+	// Validate the raw surface before the progress decorator wraps it, for the same reason
+	// registerJournal does: the non-nil decorator would mask a nil deps.Systemd.
+	if err := surfaceNotNil("systemd", reflect.ValueOf(deps.Systemd)); err != nil {
+		return err
+	}
+
+	surface := progressSystemd{interpreter: interpreter, delegate: deps.Systemd}
+
+	symbols, err := surfaceFuncs("systemd", reflect.TypeFor[Systemd](), reflect.ValueOf(surface))
 	if err != nil {
 		return err
 	}
