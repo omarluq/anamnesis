@@ -294,7 +294,7 @@ internal/vinfo/          build-time version metadata
 
 - [Recursive Language Models](https://alexzhang13.github.io/blog/2025/rlm/) by Zhang, Kraska & Khattab (MIT). The core idea anamnesis adapts.
 - [mvm](https://github.com/mvm-sh/mvm). The embedded Go interpreter the controller runs on.
-- [openai/openai-go](https://github.com/openai/openai-go). The official SDK used for all three model roles.
+- [openai/openai-go](https://github.com/openai/openai-go). The official SDK used for both model roles.
 - [librecode](https://github.com/omarluq/librecode), my terminal agent harness.
 - [XiaoConstantine/rlm-go](https://github.com/XiaoConstantine/rlm-go), a Go RLM on yaegi. The source of the `Query`/`QueryBatched`/`FINAL` primitive names.
 - [Grafito](https://github.com/ralsina/grafito), journald plus a small web UI plus a single "explain this line" call. The right spirit, a different shape.
