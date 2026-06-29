@@ -127,10 +127,16 @@ func (s *recursiveSub) Sub(prompt, evidence string) (string, error) {
 	depth := s.rc.CurrentDepth + 1
 
 	s.bumpProgress()
-	s.budget.RecordDepth(depth)
 	s.tracer.QueryStart(queryID, prompt, depth)
 
 	result, path, err := s.resolve(prompt, evidence)
+
+	// Record the depth only for a sub-call that actually ran — a leaf base-case or a
+	// recursive descent — not one the budget skipped. A skipped call never reached this
+	// depth, so counting it would inflate the max_depth_reached high-water mark.
+	if path != subCallPathSkipped {
+		s.budget.RecordDepth(depth)
+	}
 
 	s.tracer.QueryEnd(queryID, result, depth)
 	s.bumpProgress()

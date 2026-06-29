@@ -72,7 +72,7 @@ func borderLine(width int, title, left, right, horizontal string) string {
 	label := borderTitleLabel(title, innerWidth)
 	fillWidth := max(0, innerWidth-Width(label))
 
-	return left + strings.Repeat(horizontal, fillWidth) + label + right
+	return left + label + strings.Repeat(horizontal, fillWidth) + right
 }
 
 func borderTitleLabel(title string, width int) string {

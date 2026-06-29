@@ -208,8 +208,8 @@ func (controller *Controller) forceFinish(reason forceFinishReason) string {
 func (controller *Controller) forceFinishNote() string {
 	turns := len(controller.session.History)
 	if turns == 0 {
-		return "The investigation was canceled before it ran a single turn, so there " +
-			"is nothing to report."
+		return "The investigation ended before it ran a single turn, so there is " +
+			"nothing to report."
 	}
 
 	return fmt.Sprintf(

@@ -36,7 +36,7 @@ func TestCellBufferEqualCloneAndCombiningRunes(t *testing.T) {
 func TestBordersAndBufferDimensions(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, "╭─title──╮", tui.TopBorder(10, "title"))
+	assert.Equal(t, "╭title───╮", tui.TopBorder(10, "title"))
 	assert.Equal(t, 10, tui.Width(tui.TopBorder(10, "語")))
 	assert.Equal(t, "╰────────╯", tui.BottomBorder(10))
 	assert.Equal(t, "╭", tui.TopBorder(1, "ignored"))
