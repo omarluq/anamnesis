@@ -59,6 +59,52 @@ func newEndlessReader() *mockReader {
 	return reader
 }
 
+// TestQuerySeeksByRealtimeForAWindowedFilter proves a query carrying a Since lower
+// bound positions the reader with SeekRealtime — the libsystemd time seek that skips
+// straight to the window — rather than SeekHead, so a recent narrow window does not
+// decode the whole journal from the head. This is the fix for the full-journal-scan
+// hang; a regression that reverted seekWindow to SeekHead would still pass the result
+// tests but fail here.
+func TestQuerySeeksByRealtimeForAWindowedFilter(t *testing.T) {
+	t.Parallel()
+
+	reader := newPooledReader()
+	reader.On("SeekRealtime", mock.Anything).Return(nil)
+	reader.On("Next").Return(uint64(0), nil)
+
+	client, _ := clientWithReader(t, reader, 1)
+
+	filter := zeroFilter()
+	filter.Since = windowSince
+
+	_, err := client.Query(&filter)
+	require.NoError(t, err)
+
+	reader.AssertCalled(t, "SeekRealtime", uint64(windowSince.UnixMicro()))
+	reader.AssertNotCalled(t, "SeekHead")
+}
+
+// TestQuerySeeksToHeadWhenFilterHasNoLowerBound proves a query with no Since still
+// seeks to the head, so the seek-by-realtime path is taken only when there is a window
+// to skip to.
+func TestQuerySeeksToHeadWhenFilterHasNoLowerBound(t *testing.T) {
+	t.Parallel()
+
+	reader := newPooledReader()
+	reader.On("SeekHead").Return(nil)
+	reader.On("Next").Return(uint64(0), nil)
+
+	client, _ := clientWithReader(t, reader, 1)
+
+	filter := zeroFilter()
+
+	_, err := client.Query(&filter)
+	require.NoError(t, err)
+
+	reader.AssertCalled(t, "SeekHead")
+	reader.AssertNotCalled(t, "SeekRealtime", mock.Anything)
+}
+
 func TestQueryRecordsUnitBootAndPriorityMatches(t *testing.T) {
 	t.Parallel()
 

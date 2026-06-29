@@ -21,6 +21,11 @@ type Reader interface {
 	// SeekHead positions the read cursor before the first matching record so the
 	// next Next call yields the oldest entry.
 	SeekHead() error
+	// SeekRealtime positions the read cursor by wall-clock time so the next Next call
+	// yields the first matching record at or after usec microseconds since the Unix
+	// epoch. A windowed query seeks here instead of SeekHead so it reads only its time
+	// window rather than scanning the whole journal from the head.
+	SeekRealtime(usec uint64) error
 	// Next advances to the next matching record, returning the number of records
 	// advanced — zero at the end of the journal — or an error.
 	Next() (uint64, error)

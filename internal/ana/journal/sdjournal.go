@@ -75,6 +75,17 @@ func (reader *sdjournalReader) SeekHead() error {
 	return nil
 }
 
+// SeekRealtime positions the cursor by wall-clock time via libsystemd's
+// sd_journal_seek_realtime_usec, so the next Next yields the first matching record at
+// or after usec; it wraps any rejection with journal context.
+func (reader *sdjournalReader) SeekRealtime(usec uint64) error {
+	if err := reader.handle.SeekRealtimeUsec(usec); err != nil {
+		return oops.In("journal").Code("seek_realtime").Wrapf(err, "seek to realtime %d", usec)
+	}
+
+	return nil
+}
+
 // Next advances the cursor to the next matching record, returning the number of
 // records advanced — zero at the end of the journal — or an oops error wrapping a
 // libsystemd advance failure.
