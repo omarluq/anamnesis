@@ -44,7 +44,7 @@ func TestTableRenderAlignmentClippingAndDraw(t *testing.T) {
 		Headers:     nil,
 		Rows:        [][]tui.TableCell{{testTableCell("x")}},
 		Alignments:  []tui.Alignment{tui.AlignCenter},
-		Stretch:      false,
+		Stretch:     false,
 	}
 	centered := centeredTable.Render(7, 10)
 	require.Contains(t, strings.Join(lineTexts(centered), "\n"), " x ")
