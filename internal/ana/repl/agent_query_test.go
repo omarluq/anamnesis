@@ -60,6 +60,30 @@ func TestQueryReturnsSubReplyWithRenderedContext(t *testing.T) {
 	sub.AssertCalled(t, "Sub", "summarize the unit", "[a]")
 }
 
+// TestQueryWithoutCtxMakesACleanSubCall evaluates agent.Query with only a prompt — the
+// call the controller model writes most often — and proves the now-variadic ctx makes
+// it a clean sub-call instead of the "got 1 arguments, want 2" panic the prior
+// two-argument signature raised. With no ctx supplied, collapseCtx yields nil and the
+// seam receives the "<nil>" evidence placeholder.
+func TestQueryWithoutCtxMakesACleanSubCall(t *testing.T) {
+	t.Parallel()
+
+	interpreter := repl.NewInterpreter()
+
+	sub := new(mockSubLLM)
+	sub.On("Sub", "what failed near 9am", "<nil>").Return("nothing failed", nil)
+
+	repl.RegisterQuery(interpreter, sub, fullBudget())
+
+	result, err := interpreter.Eval("turn_0", `agent.Query("what failed near 9am")`)
+	require.NoError(t, err)
+
+	require.True(t, result.Retval.IsValid(), "the sub-LLM reply crosses back as the turn retval")
+	assert.Equal(t, "nothing failed", result.Retval.String())
+
+	sub.AssertCalled(t, "Sub", "what failed near 9am", "<nil>")
+}
+
 // TestQueryBatchedReturnsRepliesInOrder evaluates agent.QueryBatched over two
 // (prompt, ctx) pairs and proves both replies cross back in the input order with
 // len == 2, so the parallel fan-out preserves position regardless of completion

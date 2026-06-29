@@ -61,8 +61,8 @@ const ControllerSystemPrompt = "" +
 	"systemd.UnitStatus(\"ssh.service\"); a bare \"ssh\" resolves to an empty status.\n" +
 	"\n" +
 	"## agent (RLM primitives)\n" +
-	"- agent.Query(prompt string, ctx any) string         — recursive sub-LLM call, " +
-	"synchronous\n" +
+	"- agent.Query(prompt string, ctx ...any) string   — recursive sub-LLM call, " +
+	"synchronous; ctx is OPTIONAL — agent.Query(\"…\") with no evidence is fine\n" +
 	"- agent.QueryBatched(prompts []string, ctxs []any) []string — parallel fan-out\n" +
 	"- agent.Cite(entries []Entry)                         — attach the []Entry from " +
 	"journal.Query as evidence; ONE argument, journal entries only (no label, no " +

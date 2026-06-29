@@ -23,8 +23,11 @@ const (
 	// not total time: every sub-call, turn-start, and byte of stdout resets it, so a
 	// legitimately slow turn — a wide fan-out whose sub-calls are all advancing — runs
 	// as long as it keeps making progress, while a wedged loop does zero I/O and trips
-	// the window. 10 minutes of no progress whatsoever is the wedge threshold.
-	defaultPerEvalTimeout = 600 * time.Second
+	// the window. 2 minutes of no progress whatsoever is the wedge threshold — long
+	// enough to cover the slowest single sub-LLM call (whose dispatch resets the
+	// window) yet far short of the 10-minute freeze that left a hung sub-call looking
+	// like the UI had locked up before it force-finished.
+	defaultPerEvalTimeout = 120 * time.Second
 )
 
 // Distinct budget sentinels; each carries its own machine-readable oops code.
