@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/gdamore/tcell/v3"
@@ -254,7 +255,7 @@ func hiddenQueryLinesText(hidden int, hint string) string {
 		unit = "line"
 	}
 
-	text := "… " + tui.Int(hidden) + " earlier output " + unit + " hidden"
+	text := "… " + strconv.Itoa(hidden) + " earlier output " + unit + " hidden"
 	if hint != "" {
 		text += "  " + hint
 	}

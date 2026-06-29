@@ -26,10 +26,6 @@ func (app *App) renderMessage(width int, message chatMessage) []tui.Line {
 		return app.renderThinkingMessage(width, message.Content)
 	case transcript.RoleToolResult, transcript.RoleBashExecution:
 		return app.renderQueryBlock(width, message)
-	case transcript.RoleCustom,
-		transcript.RoleBranchSummary,
-		transcript.RoleCompactionSummary:
-		return app.renderAssistantMessage(width, message.Content)
 	default:
 		return app.renderAssistantMessage(width, message.Content)
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/mvm-sh/mvm/interp"
 	"github.com/mvm-sh/mvm/lang/golang"
 	_ "github.com/mvm-sh/mvm/stdlib/all" // populates stdlib.Values, which allowedStdlibValues filters.
+	"github.com/samber/lo"
 	"github.com/samber/oops"
 )
 
@@ -333,14 +334,5 @@ func (interpreter *Interpreter) progressMark() int64 {
 // window: a fraction of the window so idleness is caught within roughly one window,
 // clamped so a tiny window still polls sanely and a generous one does not spin.
 func watchdogInterval(window time.Duration) time.Duration {
-	interval := window / watchdogIntervalDivisor
-	if interval < watchdogMinInterval {
-		return watchdogMinInterval
-	}
-
-	if interval > watchdogMaxInterval {
-		return watchdogMaxInterval
-	}
-
-	return interval
+	return lo.Clamp(window/watchdogIntervalDivisor, watchdogMinInterval, watchdogMaxInterval)
 }

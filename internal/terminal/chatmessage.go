@@ -322,10 +322,7 @@ func settleInterrupted(message chatMessage) chatMessage {
 		settled.Content = queryContent(message.Args, interruptedNote)
 	case transcript.RoleUser,
 		transcript.RoleAssistant,
-		transcript.RoleThinking,
-		transcript.RoleCustom,
-		transcript.RoleBranchSummary,
-		transcript.RoleCompactionSummary:
+		transcript.RoleThinking:
 		// these roles never carry a pending tool block; clearing Pending settles them.
 	}
 
