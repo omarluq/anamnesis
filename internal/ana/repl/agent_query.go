@@ -134,17 +134,36 @@ type queryRunner struct {
 
 // query backs agent.Query: it reserves one sub-call against the budget, renders
 // ctx into evidence, makes the single non-recursive sub-LLM call and returns its
-// reply. A budget breach or a failed sub-call ends the turn through fail, so the
-// controller sees the error in stdout and Eval reports it.
-func (runner *queryRunner) query(prompt string, ctx any) string {
+// reply. ctx is variadic and type-tolerant on purpose: the controller model often
+// writes agent.Query("…") with no evidence, so requiring a second argument made the
+// natural call panic and burn a turn; collapseCtx folds zero, one, or several
+// supplied values into the single evidence renderEvidence renders. A budget breach
+// or a failed sub-call ends the turn through fail, so the controller sees the error
+// in stdout and Eval reports it.
+func (runner *queryRunner) query(prompt string, ctx ...any) string {
 	runner.guard(1)
 
-	reply, err := runner.callSub(prompt, ctx)
+	reply, err := runner.callSub(prompt, collapseCtx(ctx))
 	if err != nil {
 		runner.fail(oops.In("repl").Code("sub_call_failed").Wrapf(err, "agent.Query sub-call failed"))
 	}
 
 	return reply
+}
+
+// collapseCtx folds agent.Query's optional ctx varargs into the single evidence value
+// callSub renders: nil when the model passed no ctx (agent.Query("…")), the lone value
+// when it passed one (the common agent.Query("…", entries)), or the whole slice when it
+// passed several, so renderEvidence still sees every value the controller supplied.
+func collapseCtx(ctx []any) any {
+	switch len(ctx) {
+	case 0:
+		return nil
+	case 1:
+		return ctx[0]
+	default:
+		return ctx
+	}
 }
 
 // queryBatched backs agent.QueryBatched: it reserves one sub-call per prompt, fans

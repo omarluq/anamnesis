@@ -33,7 +33,7 @@ func TestControllerSystemPromptHostSignatures(t *testing.T) {
 		"journal.Unique(field string, filter *QueryFilter) []string",
 		"systemd.UnitStatus(name string) UnitStatus",
 		"systemd.ListUnits(state string) []Unit",
-		"agent.Query(prompt string, ctx any) string",
+		"agent.Query(prompt string, ctx ...any) string",
 		"agent.QueryBatched(prompts []string, ctxs []any) []string",
 		"agent.Cite(entries []Entry)",
 		"agent.FINAL(answer string)",
