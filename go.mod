@@ -7,12 +7,10 @@ require (
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/clipperhouse/displaywidth v0.11.0
 	github.com/coreos/go-systemd/v22 v22.7.0
-	github.com/dustin/go-humanize v1.0.1
 	github.com/gdamore/tcell/v3 v3.4.0
 	github.com/mvm-sh/mvm v0.5.0
 	github.com/openai/openai-go/v3 v3.41.0
 	github.com/rs/zerolog v1.35.1
-	github.com/sahilm/fuzzy v0.1.3
 	github.com/samber/do/v2 v2.0.0
 	github.com/samber/hot v0.13.0
 	github.com/samber/lo v1.53.0
