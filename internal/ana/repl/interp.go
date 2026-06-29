@@ -330,6 +330,15 @@ func (interpreter *Interpreter) progressMark() int64 {
 	return interpreter.progress.Load() + int64(interpreter.stdout.Len())
 }
 
+// recordProgress advances the tree-wide work counter the idle watchdog samples, so a
+// host read that returns without printing — a windowed journal.Query can scan a whole
+// boot through cgo and print nothing — registers as progress rather than reading as a
+// wedge. It reads interpreter.progress at call time, so a read issued after SetProgress
+// shared the tree counter bumps that shared counter, not the pre-share local one.
+func (interpreter *Interpreter) recordProgress() {
+	interpreter.progress.Add(1)
+}
+
 // watchdogInterval picks how often the idle watchdog samples progress for a given
 // window: a fraction of the window so idleness is caught within roughly one window,
 // clamped so a tiny window still polls sanely and a generous one does not spin.

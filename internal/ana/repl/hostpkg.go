@@ -85,17 +85,8 @@ func surfaceFuncs(pkg string, surfaceType reflect.Type, value reflect.Value) (ma
 			Errorf("host surface %q declares no methods to register", pkg)
 	}
 
-	// A nil surface — an untyped nil (a zero reflect.Value, on which MethodByName
-	// would panic) or a typed nil such as a (*Client)(nil) that still satisfies the
-	// interface (whose bound methods would panic on the nil receiver) — is rejected
-	// as an oops error up front so the never-panic contract holds at the boundary
-	// for both shapes. The Kind guard precedes IsNil because IsNil panics on a
-	// non-nilable kind.
-	if !value.IsValid() || (slices.Contains(nilableKinds, value.Kind()) && value.IsNil()) {
-		return nil, oops.
-			In("repl").
-			Code("host_surface_nil").
-			Errorf("host surface %q is nil", pkg)
+	if err := surfaceNotNil(pkg, value); err != nil {
+		return nil, err
 	}
 
 	funcs := make(map[string]reflect.Value, count)
@@ -115,4 +106,22 @@ func surfaceFuncs(pkg string, surfaceType reflect.Type, value reflect.Value) (ma
 	}
 
 	return funcs, nil
+}
+
+// surfaceNotNil rejects a nil host surface as a host_surface_nil oops error: an untyped
+// nil (a zero reflect.Value, on which MethodByName would panic) or a typed nil such as a
+// (*Client)(nil) that still satisfies the interface (whose bound methods would panic on
+// the nil receiver). It is the shared guard behind surfaceFuncs and HostDeps.Register —
+// the latter validates the RAW surface with it before the progress decorator wraps the
+// surface into a non-nil struct that would otherwise mask the delegate's nil-ness. The
+// Kind guard precedes IsNil because IsNil panics on a non-nilable kind.
+func surfaceNotNil(pkg string, value reflect.Value) error {
+	if !value.IsValid() || (slices.Contains(nilableKinds, value.Kind()) && value.IsNil()) {
+		return oops.
+			In("repl").
+			Code("host_surface_nil").
+			Errorf("host surface %q is nil", pkg)
+	}
+
+	return nil
 }

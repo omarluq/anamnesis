@@ -1,6 +1,7 @@
 package repl_test
 
 import (
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -162,4 +163,34 @@ len(boots) + len(units)`
 
 	journalSurface.AssertExpectations(t)
 	systemdSurface.AssertExpectations(t)
+}
+
+// TestHostReadsAdvanceSharedProgressCounter proves a turn busy entirely in host reads
+// registers as progress so the idle watchdog cannot mistake it for a wedge. It shares a
+// fresh counter via SetProgress AFTER Register — the order the recursor uses — so the
+// test also pins that the decorator reads interpreter.progress at call time rather than
+// snapshotting the pre-share counter. Three journal.Query calls that print nothing must
+// each advance the shared counter.
+func TestHostReadsAdvanceSharedProgressCounter(t *testing.T) {
+	t.Parallel()
+
+	interpreter := repl.NewInterpreter()
+
+	journalSurface := new(repltest.MockJournal)
+	journalSurface.On("Query", mock.Anything).Return([]journal.Entry{})
+
+	deps := repl.HostDeps{Journal: journalSurface, Systemd: new(repltest.MockSystemd)}
+	require.NoError(t, deps.Register(interpreter))
+
+	progress := new(atomic.Int64)
+	interpreter.SetProgress(progress)
+
+	const src = `for i := 0; i < 3; i++ { journal.Query(&journal.QueryFilter{}) }`
+
+	_, err := interpreter.Eval("turn_0", src)
+	require.NoError(t, err)
+
+	assert.GreaterOrEqual(t, progress.Load(), int64(3),
+		"each non-printing host read advances the shared progress counter")
+	journalSurface.AssertNumberOfCalls(t, "Query", 3)
 }
