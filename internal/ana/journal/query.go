@@ -33,18 +33,38 @@ func (client *Client) Query(filter *QueryFilter) ([]Entry, error) {
 	})
 }
 
-// runQuery applies the filter's matches to reader, seeks to the head and collects
-// the decoded entries, wrapping any seek failure with journal context.
+// runQuery applies the filter's matches to reader, seeks to the window's lower bound
+// and collects the decoded entries, wrapping any seek failure with journal context.
 func runQuery(reader Reader, filter *QueryFilter) ([]Entry, error) {
 	if err := applyMatches(reader, filter); err != nil {
 		return nil, err
 	}
 
-	if err := seekHead(reader); err != nil {
+	if err := seekWindow(reader, filter); err != nil {
 		return nil, err
 	}
 
 	return collect(reader, filter)
+}
+
+// seekWindow positions reader at the query's lower time bound: it seeks by realtime to
+// Since when the filter sets one, so a recent narrow window reads only its window
+// instead of decoding the whole journal from the head, and falls back to SeekHead for a
+// query with no lower bound. A zero or pre-epoch Since — which would underflow the
+// unsigned microsecond seek — stays on the head-scan path; collect's in-Go window filter
+// keeps the result correct either way.
+func seekWindow(reader Reader, filter *QueryFilter) error {
+	filter = orEmptyFilter(filter)
+
+	if filter.Since.IsZero() || filter.Since.Unix() < 0 {
+		return seekHead(reader)
+	}
+
+	if err := reader.SeekRealtime(uint64(filter.Since.UnixMicro())); err != nil {
+		return oops.In("journal").Code("seek_realtime").Wrapf(err, "seek to %s", filter.Since)
+	}
+
+	return nil
 }
 
 // orEmptyFilter normalizes a possibly-nil filter into a non-nil one so the shared
@@ -116,7 +136,8 @@ func addMatch(reader Reader, field, value string) error {
 
 // collect walks reader from the current position, decoding each matching record
 // and keeping those that pass the in-Go predicate, until the clamped limit is
-// reached or the journal is exhausted.
+// reached, a record passes the filter's Until upper bound (records arrive oldest
+// first, so none later can fall inside the window), or the journal is exhausted.
 func collect(reader Reader, filter *QueryFilter) ([]Entry, error) {
 	filter = orEmptyFilter(filter)
 
@@ -139,6 +160,15 @@ func collect(reader Reader, filter *QueryFilter) ([]Entry, error) {
 		}
 
 		entry := parseEntry(fields)
+
+		// Records arrive in ascending realtime order, so once one passes the window's
+		// upper bound nothing later can fall inside it: stop rather than scanning forward
+		// to the journal's tail. Without this a window in the past would still read every
+		// record from the window's end onward looking for more that can never come.
+		if !filter.Until.IsZero() && entry.Timestamp.After(filter.Until) {
+			break
+		}
+
 		if keep(&entry, filter) {
 			entries = append(entries, entry)
 		}

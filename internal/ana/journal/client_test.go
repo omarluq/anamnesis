@@ -30,6 +30,11 @@ func (m *mockReader) SeekHead() error {
 	return m.Called().Error(0)
 }
 
+// SeekRealtime records the usec argument and replays the scripted error.
+func (m *mockReader) SeekRealtime(usec uint64) error {
+	return m.Called(usec).Error(0)
+}
+
 // Next replays the scripted advance count and error.
 func (m *mockReader) Next() (uint64, error) {
 	args := m.Called()

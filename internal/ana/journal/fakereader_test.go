@@ -104,6 +104,14 @@ func (reader *fixtureReader) SeekHead() error {
 	return nil
 }
 
+// SeekRealtime positions the fixture reader for a windowed read. The fixture is small
+// and read in full, and collect applies the [Since, Until] window in Go, so seeking to
+// the head returns the correct window; the production sdjournalReader does the real
+// libsystemd time seek for speed.
+func (reader *fixtureReader) SeekRealtime(_ uint64) error {
+	return reader.SeekHead()
+}
+
 // Next advances to the next matching record, returning 1 when it moved and 0 at
 // the end of the matched set.
 func (reader *fixtureReader) Next() (uint64, error) {
